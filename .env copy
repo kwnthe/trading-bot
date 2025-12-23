@@ -1,0 +1,33 @@
+# Old
+STOP_LOSS_DISTANCE_FROM_SR_MICROPIPS=3 # place the SL X amount of micropips above or bellow the previous S/R
+
+PRICE_PRECISION=10
+VOLUME_PRECISION=3
+MODE=backtest
+MARKET_TYPE=forex
+BREAKOUT_LOOKBACK_PERIOD=48
+BREAKOUT_MICROPIPS_THRESHOLD=30
+SIDEWAYS_TRIGGER_CANDLE_HEIGHT_MICROPIPS=20
+INITIAL_EQUITY=100000
+
+
+ZONE_INVERSION_MARGIN_PIPS=40 # avoid small doji candles in a continuous uptrend or downtrend
+BREAKOUT_MIN_STRENGTH_MICROPIPS=30 # we need at least X amount of micropips in order to consider a breakout valid
+RR=2
+RISK_PER_TRADE=0.01
+
+
+# Nov 23rd
+SR_CANCELLATION_THRESHOLD_MICROPIPS=40 # Cancel the order if eg in a buy the attached broken resistance is  by making a new support above
+SL_BUFFER_MICROPIPS=20 # Place the SL X pips above/below
+MIN_RISK_DISTANCE_MICROPIPS=100 
+MT5_LOGIN=8024365
+# MT5_LOGIN=8024305
+MT5_PASSWORD=Mmw2323!
+MT5_SERVER=ExclusiveMarkets-Demo
+# MT5_SYMBOL=EURUSD,GBPAUD,USDCHF
+MT5_SYMBOL=GBPJPY
+# MT5_SYMBOL=SOLUSD
+# MT5_TIMEFRAME=M1
+MT5_TIMEFRAME=H1
+MT5_PATH="C:\Program Files\MetaTrader 5\\terminal64.exe"
