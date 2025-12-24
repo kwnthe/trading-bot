@@ -3,6 +3,7 @@ import csv
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from indicators import BreakoutIndicator
 from indicators import BreakRetestIndicator
 from models.candlestick import Candlestick
@@ -388,21 +389,22 @@ class BaseStrategy(bt.Strategy):
             # Also try to store in broker's bracket_tp_sl if broker supports it
             # Access broker through the strategy's broker attribute
             # IMPORTANT: Store immediately so broker can access it when order is submitted
-            print(f"*** ATTEMPTING TO STORE TP/SL: order.ref={main_order.ref}, TP={tp}, SL={sl}, hasattr(broker)={hasattr(self, 'broker')} ***")
+            # print(f"*** ATTEMPTING TO STORE TP/SL: order.ref={main_order.ref}, TP={tp}, SL={sl}, hasattr(broker)={hasattr(self, 'broker')} ***")
             if hasattr(self, 'broker'):
-                print(f"*** BROKER TYPE: {type(self.broker)} ***")
+                # print(f"*** BROKER TYPE: {type(self.broker)} ***")
                 if hasattr(self.broker, 'store_bracket_tp_sl'):
                     self.broker.store_bracket_tp_sl(main_order.ref, tp, sl)
-                    print(f"*** STORED TP/SL IN BROKER (via method): order.ref={main_order.ref}, TP={tp}, SL={sl} ***")
+                    # print(f"*** STORED TP/SL IN BROKER (via method): order.ref={main_order.ref}, TP={tp}, SL={sl} ***")
                 elif hasattr(self.broker, 'bracket_tp_sl'):
                     self.broker.bracket_tp_sl[main_order.ref] = {'tp': tp, 'sl': sl}
-                    print(f"*** STORED TP/SL IN BROKER (direct): order.ref={main_order.ref}, TP={tp}, SL={sl} ***")
-                    print(f"*** VERIFIED STORAGE: {main_order.ref in self.broker.bracket_tp_sl} ***")
+                    # print(f"*** STORED TP/SL IN BROKER (direct): order.ref={main_order.ref}, TP={tp}, SL={sl} ***")
+                    # print(f"*** VERIFIED STORAGE: {main_order.ref in self.broker.bracket_tp_sl} ***")
                 else:
-                    print(f"*** BROKER DOES NOT HAVE bracket_tp_sl attribute ***")
+                    # print(f"*** BROKER DOES NOT HAVE bracket_tp_sl attribute ***")
+                    pass
             else:
-                print(f"*** STRATEGY DOES NOT HAVE BROKER ATTRIBUTE ***")
-
+                # print(f"*** STRATEGY DOES NOT HAVE BROKER ATTRIBUTE ***")
+                pass
         return orders
     
     def calculate_position_size(self, risk_distance: float) -> float:
@@ -447,103 +449,113 @@ class BaseStrategy(bt.Strategy):
 
     def export_trades_to_csv(self, filename=None):
         """Export all completed trades to CSV file"""
-        if not self.trades:
-            self.log("No trades to export")
+        # Get only completed trades (those with pnl set)
+        completed_trades = [t for t in self.trades.values() if t.get('pnl') is not None]
+        
+        if not completed_trades:
+            self.log("No completed trades to export")
             return None
         
-        self.log(f"Exporting {len(self.trades)} trades to CSV")
+        self.log(f"Exporting {len(completed_trades)} completed trades to CSV")
         
+        # Get backtest metadata from cerebro if available
+        cerebro = self._get_cerebro()
         if filename is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # filename = f"trades_export_{timestamp}.csv"
-            filename = f"rr_{self.params.rr}.csv"
-            # filename = f"trades_export.csv"
+            if cerebro and hasattr(cerebro, 'backtest_metadata'):
+                # Use generate_csv_filename with backtest metadata
+                metadata = cerebro.backtest_metadata
+                symbol = metadata.get('symbol', self.params.symbol or 'UNKNOWN')
+                timeframe = metadata.get('timeframe')
+                start_date = metadata.get('start_date')
+                end_date = metadata.get('end_date')
+                
+                if timeframe and start_date and end_date:
+                    # Import generate_csv_filename
+                    from src.utils.backtesting import generate_csv_filename
+                    filename = generate_csv_filename(symbol, timeframe, start_date, end_date)
+                    # Modify path to use data/backtests directory
+                    filename = Path(filename)
+                    filename = filename.name  # Get just the filename
+                else:
+                    filename = f"rr_{self.params.rr}.csv"
+            else:
+                filename = f"rr_{self.params.rr}.csv"
         
         # Ensure we're in the project root directory
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        filepath = os.path.join(project_root, filename)
+        # Create data/backtests directory if it doesn't exist
+        backtests_dir = os.path.join(project_root, 'data', 'backtests')
+        os.makedirs(backtests_dir, exist_ok=True)
+        filepath = os.path.join(backtests_dir, filename)
         
         try:
+            # Define CSV columns - only fields that are already tracked
+            fieldnames = [
+                'trade_id', 'symbol', 'order_side', 'state',
+                'placed_candle', 'placed_datetime',
+                'entry_price', 'entry_executed_price',
+                'size', 'tp', 'sl',
+                'open_candle', 'open_datetime',
+                'close_candle', 'close_datetime',
+                'exit_price', 'pnl', 'close_reason'
+            ]
+            
             with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
-                # Calculate statistics
-                completed_trades = [t for t in self.trades.values() if 'pnl' in t and t['pnl'] is not None]
-                total_trades = len(completed_trades)
-                
-                if total_trades > 0:
-                    winning_trades = [t for t in completed_trades if t['pnl'] > 0]
-                    losing_trades = [t for t in completed_trades if t['pnl'] < 0]
-                    
-                    win_ratio = len(winning_trades) / total_trades if total_trades > 0 else 0
-                    total_tps = len(winning_trades)
-                    total_sls = len(losing_trades)
-                else:
-                    win_ratio = 0
-                    total_tps = 0
-                    total_sls = 0
-                # Write trade data
-                fieldnames = [
-                    'id', 'type', 'size', 'TP', 'SL', 
-                    'S_on_placement', 'R_on_placement', 
-                    'RR', 'pnl', 'open_candle', 'close_candle', 'open_equity', 'close_equity',
-                    'entry_order_price', 'entry_execution_price', 'entry_slippage',
-                    'tp_order_price', 'tp_execution_price', 'tp_slippage',
-                    'sl_order_price', 'sl_execution_price', 'sl_slippage',
-                    'total_slippage', 'close_execution_price', 'close_slippage'
-                ]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                
-                # Write header
                 writer.writeheader()
                 
-                # Write trade data
+                # Sort trades by open_candle to maintain chronological order
+                sorted_trades = sorted(completed_trades, key=lambda x: x.get('open_candle', 0) or 0)
+                
                 trades_written = 0
-                for trade in self.trades.values():
+                for trade in sorted_trades:
                     try:
-                        export_trade = {k: v for k, v in trade.items()}
-                        
-                        # Format type field
-                        if 'type' in export_trade:
-                            export_trade['type'] = f'{export_trade['type']} ({export_trade['open_candle']} -> {export_trade.get('close_candle', 'N/A')})'
-                        
-                        # Ensure all fieldnames exist with defaults
-                        filtered_trade = {}
+                        # Convert OrderSide enum to string if needed
+                        row = {}
                         for field in fieldnames:
-                            if field in export_trade:
-                                filtered_trade[field] = export_trade[field]
+                            value = trade.get(field)
+                            # Handle OrderSide enum
+                            if field == 'order_side' and isinstance(value, OrderSide):
+                                row[field] = value.name
+                            # Handle TradeState enum
+                            elif field == 'state' and isinstance(value, TradeState):
+                                row[field] = value.name
                             else:
-                                # Set defaults for missing execution fields
-                                if 'slippage' in field or 'execution' in field:
-                                    filtered_trade[field] = None
-                                else:
-                                    filtered_trade[field] = export_trade.get(field, None)
+                                row[field] = value
                         
-                        writer.writerow(filtered_trade)
+                        writer.writerow(row)
                         trades_written += 1
+                        
                     except Exception as e:
-                        self.log(f"Error writing trade {trade.get('id', 'unknown')} to CSV: {e}")
+                        self.log(f"Error writing trade {trade.get('trade_id', 'unknown')} to CSV: {e}")
                         import traceback
                         self.log(traceback.format_exc())
                         continue
                 
-                self.log(f"Wrote {trades_written} trades to CSV file")
-                self.log(f"Total TPs: {total_tps}, Total SLs: {total_sls}")
+                # Calculate statistics
+                winning_trades = [t for t in completed_trades if t.get('pnl', 0) > 0]
+                losing_trades = [t for t in completed_trades if t.get('pnl', 0) < 0]
+                total_trades = len(completed_trades)
+                win_ratio = len(winning_trades) / total_trades if total_trades > 0 else 0
+                total_tps = len(winning_trades)
+                total_sls = len(losing_trades)
                 
-
-                # Calculate additional statistics
-                total_entry_slippage = sum([t.get('entry_slippage', 0) or 0 for t in completed_trades])
-                total_close_slippage = sum([t.get('close_slippage', 0) or 0 for t in completed_trades])
-                total_slippage_all = sum([t.get('total_slippage', 0) or 0 for t in completed_trades])
-                avg_entry_slippage = total_entry_slippage / total_trades if total_trades > 0 else 0
-                avg_close_slippage = total_close_slippage / total_trades if total_trades > 0 else 0
-                avg_total_slippage = total_slippage_all / total_trades if total_trades > 0 else 0
+                # Safely calculate PnL sums
+                def safe_pnl_sum(trades_list):
+                    return sum([float(t.get('pnl', 0) or 0) for t in trades_list if t.get('pnl') is not None])
+                
+                total_pnl = safe_pnl_sum(completed_trades)
+                total_win_pnl = safe_pnl_sum(winning_trades)
+                total_loss_pnl = safe_pnl_sum(losing_trades)
                 
                 # Calculate equity curve for drawdown
                 equity_curve = []
-                current_equity = self.initial_cash
-                for trade in sorted(completed_trades, key=lambda x: x.get('open_candle', 0)):
-                    equity_curve.append(current_equity)
-                    if 'pnl' in trade:
-                        current_equity += trade['pnl']
+                equity = self.initial_cash
+                for trade in sorted_trades:
+                    equity_curve.append(equity)
+                    pnl_val = trade.get('pnl')
+                    if pnl_val is not None:
+                        equity += pnl_val
                 equity_curve.append(self.broker.getvalue())
                 
                 # Calculate max drawdown
@@ -556,29 +568,28 @@ class BaseStrategy(bt.Strategy):
                     if dd > max_dd:
                         max_dd = dd
                 
-                # Calculate Sharpe ratio (simplified)
+                # Calculate Sharpe ratio
                 import pandas as pd
-                returns = pd.Series([t['pnl'] / self.initial_cash for t in completed_trades])
+                returns = pd.Series([t.get('pnl', 0) / self.initial_cash for t in completed_trades if t.get('pnl') is not None])
                 sharpe_ratio = 0.0
                 if len(returns) > 0 and returns.std() > 0:
                     sharpe_ratio = (returns.mean() / returns.std()) * (252 ** 0.5)
                 
                 # Write statistics footer
+                final_equity = self.broker.getvalue()
+                pnl_percentage = ((final_equity - self.initial_cash) / self.initial_cash * 100) if self.initial_cash > 0 else 0.0
+                
                 csvfile.write(f"# RR: {self.params.rr}\n")
                 csvfile.write(f"# Win Ratio: {win_ratio:.2%}\n")
                 csvfile.write(f"# TPs: {total_tps}\n")
                 csvfile.write(f"# SLs: {total_sls}\n")
                 csvfile.write(f"# Total Trades: {total_trades}\n")
-                csvfile.write(f"# Total PnL: {sum([t['pnl'] for t in self.trades.values() if 'pnl' in t])}\n")
-                csvfile.write(f"# Total Win PnL: {sum([t['pnl'] for t in winning_trades if 'pnl' in t])}\n")
-                csvfile.write(f"# Total Loss PnL: {sum([t['pnl'] for t in losing_trades if 'pnl' in t])}\n")
-                csvfile.write(f"# Init: {self.initial_cash}, Final: {self.broker.getvalue()}, Pnl%: {((self.broker.getvalue() - self.initial_cash) / self.initial_cash * 100):.2f}%\n")
+                csvfile.write(f"# Total PnL: {total_pnl}\n")
+                csvfile.write(f"# Total Win PnL: {total_win_pnl}\n")
+                csvfile.write(f"# Total Loss PnL: {total_loss_pnl}\n")
+                csvfile.write(f"# Init: {self.initial_cash}, Final: {final_equity}, Pnl%: {pnl_percentage:.2f}%\n")
                 csvfile.write(f"# Max Drawdown: {max_dd:.2%}\n")
                 csvfile.write(f"# Sharpe Ratio: {sharpe_ratio:.2f}\n")
-                csvfile.write(f"# Avg Entry Slippage: {avg_entry_slippage:.5f} ({avg_entry_slippage / 0.0001:.2f} pips)\n")
-                csvfile.write(f"# Avg Close Slippage: {avg_close_slippage:.5f} ({avg_close_slippage / 0.0001:.2f} pips)\n")
-                csvfile.write(f"# Avg Total Slippage: {avg_total_slippage:.5f} ({avg_total_slippage / 0.0001:.2f} pips)\n")
-                csvfile.write(f"# Total Slippage Cost: {total_slippage_all:.2f}\n")
                 csvfile.write(f"#\n")
             
             self.log(f"Trades exported to: {filepath}")
@@ -586,6 +597,8 @@ class BaseStrategy(bt.Strategy):
             
         except Exception as e:
             self.log(f"Error exporting trades to CSV: {e}")
+            import traceback
+            self.log(traceback.format_exc())
             return None
     
     def log(self, txt, dt=None):

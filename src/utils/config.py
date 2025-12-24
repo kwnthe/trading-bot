@@ -4,7 +4,7 @@ Configuration utility for loading environment variables with Pydantic.
 
 import sys
 from pydantic_settings import BaseSettings
-from pydantic import Field, field_validator, ValidationError
+from pydantic import Field, ValidationError
 from typing import Literal, Optional
 
 VALID_MARKET_TYPES = {"forex", "crypto", "stocks"}

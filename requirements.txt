@@ -25,6 +25,7 @@ loguru>=0.7.2
 
 # HTTP requests for API calls
 requests>=2.31.0
+flask>=3.0.0
 
 # Optional: For live trading (uncomment if needed)
 # ccxt>=4.1.77
@@ -32,3 +33,7 @@ requests>=2.31.0
 
 # MetaTrader 5 integration for live trading
 # MetaTrader5>=5.0.45
+
+# Parameter tuning and optimization
+scikit-optimize>=0.9.0
+tqdm>=4.66.0

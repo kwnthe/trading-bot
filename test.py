@@ -6,7 +6,13 @@ original_stdout = sys.stdout
 original_stderr = sys.stderr
 # sys.stdout = open(os.devnull, 'w')
 # sys.stderr = open(os.devnull, 'w')
-dotenv_path = os.path.abspath(os.path.join("..", ".env"))
+
+# Load .env file - try current directory first, then parent directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+dotenv_path = os.path.join(script_dir, ".env")
+if not os.path.exists(dotenv_path):
+    # Try parent directory (for notebooks)
+    dotenv_path = os.path.join(os.path.dirname(script_dir), ".env")
 load_dotenv(dotenv_path)
 
 # Override environment variables BEFORE importing Config
@@ -40,12 +46,17 @@ end_date = datetime(2025, 12, 21, 23, 59, 59)
 
 
 
-cerebro, data = backtesting(
+results = backtesting(
         symbols=symbols,
         timeframe=timeframe,
         start_date=start_date,
         end_date=end_date,
         max_candles=max_candles
     )
+
+cerebro = results['cerebro']
+data = results['data']
+stats = results['stats']
+
 for symbol_index, (symbol, pair_data) in enumerate(data.items()):
-    plotly_plot(cerebro, pair_data, symbol, symbol_index=symbol_index, height=700)
+    plotly_plot(cerebro, pair_data, symbol, symbol_index=symbol_index)

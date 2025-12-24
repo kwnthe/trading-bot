@@ -21,7 +21,7 @@ from src.utils.backtesting import prepare_backtesting
 from src.models.timeframe import Timeframe
 from src.utils.plot import plotly_plot
 
-def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, end_date: datetime, max_candles: int = None):
+def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, end_date: datetime, max_candles: int = None, print_trades: bool = False):
     symbols_list = prepare_backtesting(symbols, timeframe, start_date, end_date)
     print(f"symbols_list: {symbols_list}")
 
@@ -48,6 +48,14 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
     
     # For backward compatibility, keep symbol variable (will use first symbol)
     symbol = symbols_list[0]['symbol']
+    
+    # Store backtest metadata for CSV export (after symbol is defined)
+    cerebro.backtest_metadata = {
+        'symbol': symbol,
+        'timeframe': timeframe,
+        'start_date': start_date,
+        'end_date': end_date
+    }
 
     cerebro.addobserver(BuySellObserver)
     
@@ -88,6 +96,13 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
     
     # Calculate statistical metrics
     completed_trades = strat.completed_trades
+    
+    # Initialize default values for when there are no trades
+    win_rate = 0.0
+    avg_win = 0.0
+    avg_loss = 0.0
+    profit_factor = 0.0
+    sharpe_ratio = 0.0
     
     print('=' * 80)
     print('BACKTEST RESULTS')
@@ -135,12 +150,6 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
                 max_dd = dd
                 max_dd_value = dd_value
         
-        # Calculate Sharpe ratio
-        returns = pd.Series([t['pnl'] / initial_cash for t in completed_trades])
-        sharpe_ratio = 0.0
-        if len(returns) > 0 and returns.std() > 0:
-            sharpe_ratio = (returns.mean() / returns.std()) * (252 ** 0.5)  # Annualized
-        
         # Calculate slippage statistics
         total_entry_slippage = sum([t.get('entry_slippage', 0) or 0 for t in completed_trades])
         total_close_slippage = sum([t.get('close_slippage', 0) or 0 for t in completed_trades])
@@ -179,14 +188,36 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
     else:
         print('No completed trades to analyze.')
     
-    print('=' * 80)
-
+    if print_trades:
+        strat.print_trades()
+    print(f"Trades verified: {strat.verify_trades()}")
     # Export trades to CSV (this is also automatically called in the stop() method)
     csv_file = strat.export_trades_to_csv()
     if csv_file:
         print(f"Trades exported to: {csv_file}")
     
-    return cerebro, data_for_plotly
+    # Calculate Sharpe ratio if we have trades
+    if completed_trades:
+        returns = pd.Series([t['pnl'] / initial_cash for t in completed_trades])
+        if len(returns) > 0 and returns.std() > 0:
+            sharpe_ratio = (returns.mean() / returns.std()) * (252 ** 0.5)  # Annualized
+    
+    return {
+        'cerebro': cerebro,
+        'data': data_for_plotly,
+        'stats': {
+            'initial_cash': initial_cash,
+            'final_equity': final_equity,
+            'pnl': pnl,
+            'pnl_percentage': pnl_percentage,
+            'total_trades': len(completed_trades),
+            'win_rate': win_rate,
+            'avg_win': avg_win,
+            'avg_loss': avg_loss,
+            'profit_factor': profit_factor,
+            'sharpe_ratio': sharpe_ratio,
+        }
+    }
 
 
 def live_trading():
@@ -648,7 +679,10 @@ if __name__ == '__main__':
     if args.metatrader:
         live_trading()
     else:
-        cerebro, data = backtesting(args.symbols, args.timeframe, args.start_date, args.end_date, max_candles=args.max_candles)
+        results = backtesting(args.symbols, args.timeframe, args.start_date, args.end_date, max_candles=args.max_candles)
+        cerebro = results['cerebro']
+        data = results['data']
+        stats = results['stats']
         if args.chart:
             for symbol_index, (symbol, pair_data) in enumerate(data.items()):
                 plotly_plot(cerebro, pair_data, symbol, symbol_index=symbol_index, height=700)
