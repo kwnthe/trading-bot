@@ -48,6 +48,9 @@ class Configuration(BaseSettings):
     zones_log_repo: Optional[str] = Field(default=None)
     show_debug_logs: bool = Field(default=False)
 
+    # Indicators
+    ema_length: int = Field(default=9)
+
     class Config:
         env_file = ".env"
 

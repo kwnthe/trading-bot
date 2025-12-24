@@ -104,6 +104,36 @@ def extract_rsi(strategy, data_len: int):
     return True, rsi
 
 
+def extract_ema(strategy, data_len: int):
+    """
+    Extract EMA values from a Backtrader strategy safely.
+    """
+    if strategy is None or not hasattr(strategy, "ema"):
+        return False, None
+
+    ema_line = strategy.ema.lines.ema
+
+    try:
+        if hasattr(ema_line, "array"):
+            ema = np.asarray(ema_line.array)
+        else:
+            ema = np.asarray(list(ema_line))
+    except Exception:
+        logger.exception("Failed to extract EMA")
+        return False, None
+
+    # Align length with OHLC data
+    if len(ema) < data_len:
+        ema = np.concatenate([np.full(data_len - len(ema), np.nan), ema])
+    elif len(ema) > data_len:
+        ema = ema[-data_len:]
+
+    if np.all(np.isnan(ema)):
+        return False, None
+
+    return True, ema
+
+
 # ============================================================
 # Figure creation
 # ============================================================
@@ -174,6 +204,25 @@ def add_rsi(fig, df, rsi):
     fig.add_hline(y=70, row=2, col=1, line_dash="dash", line_color="#F23645")
     fig.add_hline(y=30, row=2, col=1, line_dash="dash", line_color="#089981")
     fig.add_hline(y=50, row=2, col=1, line_dash="dot", line_color="#787B86")
+
+
+def add_ema(fig, df, ema, has_rsi):
+    """
+    Add EMA line to the main price chart.
+    """
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=ema,
+            mode="lines",
+            line=dict(color="#FF9800", width=2),
+            name="EMA",
+            hoverinfo="skip" if not SHOW_HOVER_LABELS else "x+y",
+            showlegend=False,
+        ),
+        row=1 if has_rsi else None,
+        col=1 if has_rsi else None,
+    )
 
 def apply_tradingview_style(fig, has_rsi: bool):
     fig.update_layout(
@@ -467,9 +516,13 @@ def plotly_plot(
     df = build_ohlc_df(data)
 
     has_rsi, rsi = extract_rsi(strategy, len(df))
+    has_ema, ema = extract_ema(strategy, len(df))
     fig = create_base_figure(symbol, height, has_rsi)
 
     add_price(fig, df, has_rsi)
+
+    if has_ema:
+        add_ema(fig, df, ema, has_rsi)
 
     if has_rsi:
         add_rsi(fig, df, rsi)

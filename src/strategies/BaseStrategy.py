@@ -31,10 +31,18 @@ class BaseStrategy(bt.Strategy):
         self.open_positions_summary = {} # Tracks the current position on each data feed
         self.trades = {}
         self.logger = StrategyLogger.get_logger()
-        self.rsi = bt.indicators.RSI(
-            self.data.close,
-            period=14
-        )
+        
+        # Initialize indicators dictionary for cleaner organization
+        self.indicators = {
+            'rsi': bt.indicators.RSI(
+                self.data.close,
+                period=14
+            ),
+            'ema': bt.indicators.EMA(
+                self.data.close,
+                period=Config.ema_length
+            )
+        }
 
         # Access cerebro through broker's _owner attribute
         cerebro = getattr(self.broker, '_owner', None)
@@ -68,9 +76,19 @@ class BaseStrategy(bt.Strategy):
                         'resistance': None,
                     }
             
+            # Store SupportResistances indicators in self.indicators for cleaner access
             # For backward compatibility, keep main indicators pointing to first data feed
             self.breakout_indicator = cerebro.data_indicators[0]['breakout']
             self.break_retest_indicator = cerebro.data_indicators[0]['break_retest']
+            self.indicators['support_resistances'] = {
+                'breakout': self.breakout_indicator,
+                'break_retest': self.break_retest_indicator
+            }
+        
+        # Backward compatibility: expose indicators as direct attributes
+        # This allows existing code like strategy.ema or strategy.rsi to continue working
+        self.rsi = self.indicators.get('rsi')
+        self.ema = self.indicators.get('ema')
         
         self.just_broke_out = None
         self.breakout_trend = None
