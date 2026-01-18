@@ -58,5 +58,7 @@ cerebro = results['cerebro']
 data = results['data']
 stats = results['stats']
 
+print(f"stats: {stats}")
+
 for symbol_index, (symbol, pair_data) in enumerate(data.items()):
     plotly_plot(cerebro, pair_data, symbol, symbol_index=symbol_index)

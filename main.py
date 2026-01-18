@@ -15,7 +15,6 @@ from utils.config import Config, load_config
 from src.data.csv_data_feed import CSVDataFeed
 from indicators.TestIndicator import TestIndicator
 from strategies.BreakRetestStrategy import BreakRetestStrategy
-from src.brokers.backtesting_broker import BacktestingBroker
 from src.observers.buy_sell_observer import BuySellObserver
 from src.utils.backtesting import prepare_backtesting
 from src.models.timeframe import Timeframe
@@ -31,10 +30,12 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
     # Initialize persistent state in cerebro (survives strategy re-instantiation)
     cerebro.data_indicators = {}
     cerebro.data_state = {}
-    cerebro.broker = BacktestingBroker()
+    # cerebro.broker = BacktestingBroker()
     
     data_feeds = []
     data_for_plotly = {}
+    original_data_feeds = []  # Store references to original data feeds for resampling
+    print(f"symbols_list: {symbols_list}")
     for config in symbols_list:
         csv_feed = CSVDataFeed(
             csv_file_path=config['csv_file'],
@@ -45,6 +46,24 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
         data_for_plotly[config['symbol']] = data
         cerebro.adddata(data, name=config['symbol'])
         data_feeds.append({'feed': csv_feed, 'symbol': config['symbol']})
+        original_data_feeds.append(data)  # Store reference for resampling
+    
+    # Resample all data feeds to daily timeframe for RSI calculation
+    # Use replaydata instead of resampledata to avoid synchronization issues
+    # replaydata replays data at a different timeframe without interfering with main feed synchronization
+    # IMPORTANT: replaydata must be called BEFORE adding the strategy
+    cerebro.daily_data_mapping = {}  # Maps original data index to daily data feed
+    for i, (original_data, feed_info) in enumerate(zip(original_data_feeds, data_feeds)):
+        # Use replaydata - it replays the data at daily timeframe without affecting synchronization
+        # replaydata creates a separate data feed that replays at daily intervals
+        daily_data = cerebro.replaydata(
+            original_data,
+            timeframe=bt.TimeFrame.Days,
+            compression=1
+        )
+        daily_data._name = f"{feed_info['symbol']}_DAILY"  # Set name for identification
+        cerebro.daily_data_mapping[i] = daily_data
+        # Note: replaydata automatically adds the data feed to cerebro, so we don't need to call adddata
     
     # For backward compatibility, keep symbol variable (will use first symbol)
     symbol = symbols_list[0]['symbol']
