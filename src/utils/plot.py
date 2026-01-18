@@ -775,6 +775,7 @@ def plotly_plot(
     fig = create_base_figure(symbol, height, has_rsi)
 
     add_price(fig, df, has_rsi)
+    add_candle_index_arrows(fig, df, step=10, has_rsi=has_rsi)
 
     if has_ema:
         add_ema(fig, df, ema, has_rsi)
@@ -889,3 +890,40 @@ def _extract_orders_from_strategy(strategy, symbol: str):
         logger.warning(f"Error extracting orders from strategy: {e}")
     
     return orders_to_plot
+
+def add_candle_index_arrows(fig, df, step=10, has_rsi=True):
+    """
+    Add arrows every `step` candles to help count candle indexes.
+    """
+    dates = df["date"].reset_index(drop=True)
+    highs = df["high"].reset_index(drop=True)
+
+    arrow_x = []
+    arrow_y = []
+    arrow_text = []
+
+    for i in range(0, len(df), step):
+        arrow_x.append(dates[i])
+        arrow_y.append(highs[i] * 1.002)  # slightly above candle high
+        arrow_text.append(str(i))
+
+    fig.add_trace(
+        go.Scatter(
+            x=arrow_x,
+            y=arrow_y,
+            mode="markers+text",
+            marker=dict(
+                symbol="triangle-down",
+                size=12,
+                color="black",
+            ),
+            text=arrow_text,
+            textposition="top center",
+            name="Candle Index",
+            showlegend=False,
+            hoverinfo="text",
+            opacity=0.2,
+        ),
+        row=1 if has_rsi else None,
+        col=1 if has_rsi else None,
+    )

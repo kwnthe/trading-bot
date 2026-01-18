@@ -33,8 +33,26 @@ class BreakRetestStrategy(BaseStrategy):
         # Check if we've already processed this timestamp (prevent duplicate calls)
         # Use timestamp only since bar numbers can change between runs
         if self.last_processed_timestamp == current_bar_time:
-            print(f"SKIPPING DUPLICATE next() call - Bar #{current_bar_num} at {current_bar_time}")
             return
+            # WHY THIS HAPPENS:
+            # Backtrader can call next() multiple times for the same timestamp when:
+            # 1. Multiple data feeds + replaydata: Backtrader synchronizes all feeds and may call next()
+            #    multiple times during synchronization, especially with replaydata feeds
+            # 2. Internal synchronization: Backtrader's sync mechanism may trigger multiple calls
+            #    for the same timestamp when processing multiple symbols
+            # 3. This is NORMAL behavior - the duplicate check prevents double-processing
+            # print(f"SKIPPING DUPLICATE next() call - Bar #{current_bar_num} at {current_bar_time}")
+            # print(f"  Last processed: {self.last_processed_timestamp}")
+            # print(f"  Current: {current_bar_time}")
+            # print(f"  Number of data feeds: {len(self.datas)}")
+            # for i, data in enumerate(self.datas):
+            #     try:
+            #         feed_time = data.datetime.datetime(0)
+            #         feed_name = getattr(data, '_name', f'Feed_{i}')
+            #         print(f"    {feed_name}: {feed_time}")
+            #     except:
+            #         pass
+            # return
         
         # Mark this timestamp as processed
         self.last_processed_timestamp = current_bar_time
