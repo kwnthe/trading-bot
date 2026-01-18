@@ -6,6 +6,7 @@ from utils.logging import format_price
 from utils.config import Config
 from infrastructure import LogLevel, RepositoryName
 from src.utils.environment_variables import EnvironmentVariables
+from src.utils.trade_confirmations import RSIConfirmations
 import uuid
 import math
 
@@ -27,7 +28,11 @@ class BreakRetestStrategy(BaseStrategy):
     # ----------------------- NEXT -----------------------  
     def next(self):  
         current_bar_time = self.data.datetime.datetime(0)
-        current_bar_num = len(self.data)
+        if self.candle_index == 189 or self.candle_index == 190 or self.candle_index == 191 or self.candle_index == 192:
+            data_state = self._get_data_state()
+            support = data_state[0]['support']
+            resistance = data_state[0]['resistance']
+            print(f"current price: {self.data.close[0]}, current bar num: {self.candle_index}, current bar time: {current_bar_time}, resistance: {resistance}, support: {support}")
         is_backfilling_live_mode = Config.live_mode and not getattr(self.data, 'live_mode', False)
         
         # Check if we've already processed this timestamp (prevent duplicate calls)
@@ -78,12 +83,12 @@ class BreakRetestStrategy(BaseStrategy):
                 'breakout_trend': f'<b>{str(pair_state['breakout_trend'])}</b>' if pair_state['breakout_trend'] is not None else '',
             }
             self.log_to_repo(LogLevel.INFO, f"<b>[{data_indicators[i]['symbol']}={format_price(current_price)}]</b> {'(Backfill)' if is_backfilling_live_mode else '(Live)'}: {log_dict}", RepositoryName.ZONES, date=current_bar_time)
-            # if not is_backfilling_live_mode:
-            #     self.place_order(data_indicators[i]['data'], OrderType.LIMIT, OrderSide.BUY, 125, 1, 120, 140) 
+            daily_rsi = self.indicators['daily_rsi'][0] if self.indicators['daily_rsi'] is not None else None
             order_confirmations = [
                 pair_state['just_broke_out'],
-                self.indicators['ema'][0] <= current_price if pair_state['breakout_trend'] == Trend.UPTREND else \
-                    self.indicators['ema'][0] >= current_price,
+                # self.indicators['ema'][0] <= current_price if pair_state['breakout_trend'] == Trend.UPTREND else \
+                #     self.indicators['ema'][0] >= current_price,
+                RSIConfirmations.daily_rsi_allows_trade(daily_rsi, pair_state['breakout_trend']) if Config.check_for_daily_rsi else True,
             ]
             if not is_backfilling_live_mode and all(order_confirmations):
                 # Get the data feed for this symbol

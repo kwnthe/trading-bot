@@ -26,7 +26,7 @@ class BaseStrategy(bt.Strategy):
     params = _base_params
 
     def __init__(self):
-        self.candle_index = -1
+        self.candle_index = 0
         self.current_candle = None
         self.open_positions_summary = {} # Tracks the current position on each data feed
         self.trades = {}
@@ -70,12 +70,12 @@ class BaseStrategy(bt.Strategy):
         self.daily_data = daily_data
         
         # Initialize daily RSI indicator if daily data is available
-        # Note: We'll calculate daily RSI manually in the plot utility to ensure
-        # it's calculated from properly aggregated daily data
         if daily_data is not None:
-            # Store daily data reference - RSI will be calculated manually from daily closes
-            # This ensures we get proper daily aggregation rather than relying on replaydata's behavior
-            self.indicators['daily_rsi'] = None  # Will be calculated manually in plot.py
+            # Create RSI indicator directly on daily_data feed
+            self.indicators['daily_rsi'] = bt.indicators.RSI(
+                daily_data.close,
+                period=14
+            )
             print(f"Daily data feed available: {getattr(daily_data, '_name', 'unknown')}")
         else:
             self.indicators['daily_rsi'] = None
@@ -201,7 +201,7 @@ class BaseStrategy(bt.Strategy):
         return {}
     
     def next(self):
-        self.candle_index += 1
+        self.candle_index = len(self.data) 
         
         self.update_open_positions_summary()
         

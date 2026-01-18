@@ -35,6 +35,7 @@ class Configuration(BaseSettings):
     sl_buffer_micropips: float = Field(default=2.0, ge=0.0, le=100.0)  # Buffer in pips to add below support (BUY) or above resistance (SELL) for stop loss placement
     min_risk_distance_micropips: float = Field(default=10.0, ge=0.0, le=100.0)  # Minimum risk distance in pips for placing a trade
     pair_specific_config: dict = Field(default={})  # Pair specific configuration
+    check_for_daily_rsi: bool = Field(default=True)
     
     # MetaTrader 5 credentials (optional, required for live trading with -m flag)
     mt5_login: Optional[int] = Field(default=None)  # MT5 account number
