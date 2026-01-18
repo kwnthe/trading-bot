@@ -1,14 +1,13 @@
-import backtrader as bt
-import numpy as np
 from src.models.trend import Trend
 from src.strategies.BaseStrategy import BaseStrategy
 from src.models.order import OrderType, TradeState, OrderSide, log_trade
 from src.utils.strategy_utils.general_utils import convert_micropips_to_price
 from utils.logging import format_price
 from utils.config import Config
-import uuid
 from infrastructure import LogLevel, RepositoryName
 from src.utils.environment_variables import EnvironmentVariables
+import uuid
+import math
 
 class BreakRetestStrategy(BaseStrategy):
     params = BaseStrategy._base_params + ()
@@ -49,27 +48,31 @@ class BreakRetestStrategy(BaseStrategy):
         if not data_state:
             return
         
-        for i, state in data_state.items():
+        for i, pair_state in data_state.items():
             if i not in data_indicators:
                 continue
             data = data_indicators[i]['data']
             current_price = data.close[0]
             log_dict = {
-                **state,
-                'support': format_price(state['support']),
-                'resistance': format_price(state['resistance']),
-                'breakout_trend': f'<b>{str(state['breakout_trend'])}</b>' if state['breakout_trend'] is not None else '',
+                **pair_state,
+                'support': format_price(pair_state['support']),
+                'resistance': format_price(pair_state['resistance']),
+                'breakout_trend': f'<b>{str(pair_state['breakout_trend'])}</b>' if pair_state['breakout_trend'] is not None else '',
             }
             self.log_to_repo(LogLevel.INFO, f"<b>[{data_indicators[i]['symbol']}={format_price(current_price)}]</b> {'(Backfill)' if is_backfilling_live_mode else '(Live)'}: {log_dict}", RepositoryName.ZONES, date=current_bar_time)
             # if not is_backfilling_live_mode:
             #     self.place_order(data_indicators[i]['data'], OrderType.LIMIT, OrderSide.BUY, 125, 1, 120, 140) 
-            if not is_backfilling_live_mode and state['just_broke_out']:
+            order_confirmations = [
+                pair_state['just_broke_out'],
+                self.indicators['ema'][0] <= current_price if pair_state['breakout_trend'] == Trend.UPTREND else \
+                    self.indicators['ema'][0] >= current_price,
+            ]
+            if not is_backfilling_live_mode and all(order_confirmations):
                 # Get the data feed for this symbol
                 data = data_indicators[i]['data']
                 self.place_retest_order_for_data(i)
             self.invalidate_pending_trades_if_sr_changed_or_completed(i)  
 
-    # ----------------------- PLACE RETEST ORDER FOR SPECIFIC DATA FEED -----------------------  
     def place_retest_order_for_data(self, data_index):  
         """Place retest order for a specific data feed."""
         # Access data_indicators and data_state from cerebro (persists across strategy re-instantiation)
@@ -79,8 +82,9 @@ class BreakRetestStrategy(BaseStrategy):
         if data_index not in data_indicators or data_index not in data_state:
             return
         
-        # Check if we're in live mode for this data feed
+        # Get the data feed for this symbol
         data = data_indicators[data_index]['data']
+        symbol = data_indicators[data_index]['symbol']
         
         if self.broker.getvalue() <= 0:  
             return  
@@ -110,7 +114,22 @@ class BreakRetestStrategy(BaseStrategy):
         risk_distance = abs(resistance - support)  
         min_risk_distance_price = convert_micropips_to_price(EnvironmentVariables.access_config_value(EnvironmentVariables.MIN_RISK_DISTANCE_MICROPIPS, symbol), symbol)  
         if risk_distance < min_risk_distance_price:  
-            return  
+            return
+        order_datetime = data.datetime.datetime(0)
+        
+        # Get candle_data to verify we're updating the correct candle
+        candle_data = self._get_candle_data()
+        candle_index = len(candle_data.get(data_index, [])) - 1 if data_index in candle_data and candle_data[data_index] else -1
+        
+        # Store the datetime in the candle_data so we can verify it matches
+        self.set_candle_data(data_feed_index=data_index, order_placed=True, order_datetime=order_datetime)
+        
+        # Verify the datetime was stored correctly
+        stored_datetime = None
+        if data_index in candle_data and candle_data[data_index] and candle_index >= 0:
+            stored_datetime = candle_data[data_index][candle_index].get('order_datetime')
+        
+        self.logger.log(LogLevel.INFO, f"Placing retest order for {symbol} (data_index={data_index}) on date {order_datetime}, candle_index={candle_index}, stored_datetime={stored_datetime}", RepositoryName.WIP)  
 
         # Determine trade side  
         if breakout_trend == Trend.UPTREND:  

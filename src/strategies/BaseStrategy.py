@@ -32,10 +32,32 @@ class BaseStrategy(bt.Strategy):
         self.trades = {}
         self.logger = StrategyLogger.get_logger()
         
+        # Get cerebro to access daily_data_mapping
+        cerebro = getattr(self.broker, '_owner', None)
+        if cerebro is None:
+            cerebro = getattr(self.broker, 'cerebro', None)
+        
+        # Find daily resampled data feed for the first data feed (for backward compatibility)
+        # Daily data feed will have '_DAILY' suffix in its name
+        daily_data = None
+        if cerebro is not None and hasattr(cerebro, 'daily_data_mapping'):
+            # Use the mapping if available (maps original data index to daily data)
+            daily_data = cerebro.daily_data_mapping.get(0, None)
+        
+        # Fallback: search by name if mapping not available
+        if daily_data is None:
+            for data in self.datas:
+                data_name = getattr(data, '_name', '')
+                if '_DAILY' in data_name.upper():
+                    daily_data = data
+                    break
+        
         # Initialize indicators dictionary for cleaner organization
+        regular_rsi_data_source = self.data.close
+        
         self.indicators = {
             'rsi': bt.indicators.RSI(
-                self.data.close,
+                regular_rsi_data_source,
                 period=14
             ),
             'ema': bt.indicators.EMA(
@@ -43,6 +65,21 @@ class BaseStrategy(bt.Strategy):
                 period=Config.ema_length
             )
         }
+        
+        # Store reference to daily data for potential future use
+        self.daily_data = daily_data
+        
+        # Initialize daily RSI indicator if daily data is available
+        # Note: We'll calculate daily RSI manually in the plot utility to ensure
+        # it's calculated from properly aggregated daily data
+        if daily_data is not None:
+            # Store daily data reference - RSI will be calculated manually from daily closes
+            # This ensures we get proper daily aggregation rather than relying on replaydata's behavior
+            self.indicators['daily_rsi'] = None  # Will be calculated manually in plot.py
+            print(f"Daily data feed available: {getattr(daily_data, '_name', 'unknown')}")
+        else:
+            self.indicators['daily_rsi'] = None
+            print("Daily RSI not initialized - daily_data is None")
 
         # Access cerebro through broker's _owner attribute
         cerebro = getattr(self.broker, '_owner', None)
@@ -56,39 +93,61 @@ class BaseStrategy(bt.Strategy):
                 cerebro.data_indicators = {}
             if not hasattr(cerebro, 'data_state'):
                 cerebro.data_state = {}
+            if not hasattr(cerebro, 'candle_data'):
+                # Candle data storage: dict of lists, one list per data feed
+                # Each list contains dicts, one per candle, storing arbitrary data (e.g., {'order_placed': True})
+                # This data can be extracted by plot.py for visualization
+                cerebro.candle_data = {}
             
             # Initialize indicators for all data feeds
-            for i, data in enumerate(self.datas):
-                symbol = getattr(data, '_name', self.params.symbol or f'SYMBOL_{i}')
+            # Get daily data mapping if available
+            daily_data_mapping = getattr(cerebro, 'daily_data_mapping', {}) if cerebro is not None else {}
+            
+            # Track original data feed index (excluding daily resampled feeds)
+            original_data_index = 0
+            
+            for data in self.datas:
+                symbol = getattr(data, '_name', self.params.symbol or f'SYMBOL_{original_data_index}')
+                # Skip daily data feeds (they have '_DAILY' in name)
+                if '_DAILY' in symbol.upper():
+                    continue
+                
                 # Only initialize if not already present (to preserve state across runs)
-                if i not in cerebro.data_indicators:
-                    cerebro.data_indicators[i] = {
+                if original_data_index not in cerebro.data_indicators:
+                    cerebro.data_indicators[original_data_index] = {
                         'breakout': BreakoutIndicator(data, symbol=symbol),
                         'break_retest': BreakRetestIndicator(data, symbol=symbol),
                         'symbol': symbol,
                         'data': data
                     }
-                if i not in cerebro.data_state:
-                    cerebro.data_state[i] = {
+                
+                if original_data_index not in cerebro.data_state:
+                    cerebro.data_state[original_data_index] = {
                         'just_broke_out': None,
                         'breakout_trend': None,
                         'support': None,
                         'resistance': None,
                     }
+                if original_data_index not in cerebro.candle_data:
+                    cerebro.candle_data[original_data_index] = []
+                
+                original_data_index += 1
             
             # Store SupportResistances indicators in self.indicators for cleaner access
             # For backward compatibility, keep main indicators pointing to first data feed
-            self.breakout_indicator = cerebro.data_indicators[0]['breakout']
-            self.break_retest_indicator = cerebro.data_indicators[0]['break_retest']
-            self.indicators['support_resistances'] = {
-                'breakout': self.breakout_indicator,
-                'break_retest': self.break_retest_indicator
-            }
+            if 0 in cerebro.data_indicators:
+                self.breakout_indicator = cerebro.data_indicators[0]['breakout']
+                self.break_retest_indicator = cerebro.data_indicators[0]['break_retest']
+                self.indicators['support_resistances'] = {
+                    'breakout': self.breakout_indicator,
+                    'break_retest': self.break_retest_indicator
+                }
         
         # Backward compatibility: expose indicators as direct attributes
         # This allows existing code like strategy.ema or strategy.rsi to continue working
         self.rsi = self.indicators.get('rsi')
         self.ema = self.indicators.get('ema')
+        self.daily_rsi = self.indicators.get('daily_rsi')
         
         self.just_broke_out = None
         self.breakout_trend = None
@@ -132,19 +191,35 @@ class BaseStrategy(bt.Strategy):
             return self.broker.data_state
         return {}
     
+    def _get_candle_data(self):
+        """Get candle_data from cerebro or broker fallback."""
+        cerebro = self._get_cerebro()
+        if cerebro is not None and hasattr(cerebro, 'candle_data'):
+            return cerebro.candle_data
+        elif hasattr(self.broker, 'candle_data'):
+            return self.broker.candle_data
+        return {}
+    
     def next(self):
         self.candle_index += 1
+        
         self.update_open_positions_summary()
         
         # Get cerebro instance
         cerebro = self._get_cerebro()
         data_indicators = self._get_data_indicators()
         data_state = self._get_data_state()
+        candle_data = self._get_candle_data()
         
         # Process all data feeds and update state for each
         for i, indicators_info in data_indicators.items():
             data = indicators_info['data']
             breakout_ind = indicators_info['breakout']
+            
+            # Initialize data dict for this candle for this data feed
+            if i not in candle_data:
+                candle_data[i] = []
+            candle_data[i].append({})
             
             # Update state for this data feed
             just_broke_out, breakout_trend = breakout_ind.just_broke_out()
@@ -155,19 +230,25 @@ class BaseStrategy(bt.Strategy):
             if cerebro is not None:
                 if not hasattr(cerebro, 'data_state'):
                     cerebro.data_state = {}
+                if not hasattr(cerebro, 'candle_data'):
+                    cerebro.candle_data = {}
                 cerebro.data_state[i] = cerebro.data_state.get(i, {})
                 cerebro.data_state[i]['just_broke_out'] = just_broke_out
                 cerebro.data_state[i]['breakout_trend'] = breakout_trend
                 cerebro.data_state[i]['support'] = support
                 cerebro.data_state[i]['resistance'] = resistance
+                cerebro.candle_data[i] = candle_data.get(i, [])
             else:
                 if not hasattr(self.broker, 'data_state'):
                     self.broker.data_state = {}
+                if not hasattr(self.broker, 'candle_data'):
+                    self.broker.candle_data = {}
                 self.broker.data_state[i] = self.broker.data_state.get(i, {})
                 self.broker.data_state[i]['just_broke_out'] = just_broke_out
                 self.broker.data_state[i]['breakout_trend'] = breakout_trend
                 self.broker.data_state[i]['support'] = support
                 self.broker.data_state[i]['resistance'] = resistance
+                self.broker.candle_data[i] = candle_data.get(i, [])
         
         # Get updated state
         data_state = self._get_data_state()
@@ -648,6 +729,72 @@ class BaseStrategy(bt.Strategy):
         #     emoji = '🎯'
         
         self.log(f"{emoji}  {order_side.name}({candle_index}) {additional_info} Cash: {int(self.current_cash)}")
+    
+    def get_data_feed_index(self, data: bt.LineSeries) -> int:
+        """
+        Get the data feed index for a given data object.
+        
+        Args:
+            data: Backtrader data feed object
+        
+        Returns:
+            Index of the data feed, or 0 if not found
+        
+        Example:
+            data_feed_index = self.get_data_feed_index(data)
+            self.set_candle_data(data_feed_index=data_feed_index, order_placed=True)
+        """
+        data_indicators = self._get_data_indicators()
+        for i, indicators_info in data_indicators.items():
+            if indicators_info['data'] is data:
+                return i
+        return 0  # Default to first data feed if not found
+    
+    def set_candle_data(self, data_feed_index=0, **kwargs):
+        """
+        Set data for the current candle for a specific data feed.
+        
+        Args:
+            data_feed_index: Index of the data feed (0 for first symbol, 1 for second, etc.)
+            **kwargs: Key-value pairs to store for this candle
+        
+        Example:
+            # For the first data feed (default)
+            self.set_candle_data(order_placed=True, signal_type='breakout')
+            
+            # For a specific data feed (e.g., second symbol)
+            self.set_candle_data(data_feed_index=1, order_placed=True, signal_type='breakout')
+            
+            # When placing an order on a specific data feed
+            data_feed_index = self.get_data_feed_index(data)
+            self.set_candle_data(data_feed_index=data_feed_index, order_placed=True)
+        
+        The data will be stored and can be extracted by plot.py for visualization.
+        """
+        candle_data = self._get_candle_data()
+        if data_feed_index in candle_data and candle_data[data_feed_index]:
+            candle_data[data_feed_index][-1].update(kwargs)
+    
+    def get_candle_data(self, key, data_feed_index=0, default=None):
+        """
+        Get data for the current candle for a specific data feed.
+        
+        Args:
+            key: Key to retrieve
+            data_feed_index: Index of the data feed (0 for first symbol, 1 for second, etc.)
+            default: Default value if key not found
+        
+        Example:
+            # For the first data feed (default)
+            order_placed = self.get_candle_data('order_placed', default=False)
+            
+            # For a specific data feed
+            order_placed = self.get_candle_data('order_placed', data_feed_index=1, default=False)
+        """
+        candle_data = self._get_candle_data()
+        if data_feed_index in candle_data and candle_data[data_feed_index]:
+            return candle_data[data_feed_index][-1].get(key, default)
+        return default
     
     def update_open_positions_summary(self):
         # Access data_indicators from cerebro (persists across strategy re-instantiation)

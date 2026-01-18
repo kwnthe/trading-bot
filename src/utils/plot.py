@@ -134,6 +134,177 @@ def extract_ema(strategy, data_len: int):
     return True, ema
 
 
+def extract_daily_rsi(strategy, data_len: int, df_dates: pd.Series):
+    """
+    Extract Daily RSI values from strategy's daily_data feed (created via replaydata).
+    This uses the actual daily data feed so any issues with replaydata will be visible.
+    Daily RSI has fewer data points, so we need to forward-fill values
+    to align with the main timeframe data.
+    """
+    # Get daily data feed from strategy
+    if strategy is None or not hasattr(strategy, "daily_data"):
+        print("extract_daily_rsi: strategy is None or has no daily_data attribute")
+        return False, None
+    
+    daily_data = strategy.daily_data
+    if daily_data is None:
+        print("extract_daily_rsi: daily_data is None")
+        return False, None
+    
+    # Extract daily close prices from the daily data feed (created by replaydata)
+    # Note: replaydata's array contains all intraday bars, not just daily bars
+    # We need to filter to get only one bar per day (the last bar of each day)
+    try:
+        all_dates = pd.Series([bt.num2date(d) for d in daily_data.datetime.array])
+        all_closes = np.asarray(daily_data.close.array)
+        
+        # Filter to get only one bar per day (the last bar of each day)
+        # Group by date and take the last value
+        df_daily = pd.DataFrame({
+            'date': pd.to_datetime(all_dates).dt.normalize(),
+            'datetime': all_dates,
+            'close': all_closes
+        })
+        
+        # Group by date and take the last bar of each day
+        daily_aggregated = df_daily.groupby('date').agg({
+            'close': 'last',
+            'datetime': 'last'
+        }).reset_index()
+        
+        daily_aggregated = daily_aggregated.sort_values('datetime')
+        
+        daily_dates = daily_aggregated['datetime']
+        daily_closes = daily_aggregated['close'].values
+        
+        print(f"extract_daily_rsi: Filtered {len(all_closes)} bars from replaydata to {len(daily_closes)} daily bars")
+    except Exception as e:
+        logger.exception(f"Failed to extract daily data: {e}")
+        return False, None
+    
+    if len(daily_closes) < 15:  # Need at least period+1 for RSI
+        print(f"extract_daily_rsi: Not enough daily bars ({len(daily_closes)} < 15). Need at least 15 days for RSI(14) calculation.")
+        return False, None
+    
+    # Calculate RSI from daily closes (from replaydata feed)
+    daily_rsi = calculate_rsi_manual(daily_closes, period=14)
+    
+    print(f"extract_daily_rsi: Extracted {len(daily_rsi)} Daily RSI values from {len(daily_closes)} daily bars (from replaydata)")
+    print(f"extract_daily_rsi: Date range: {daily_dates.min()} to {daily_dates.max()}")
+    
+    # Align daily RSI with main timeframe dates
+    # Each daily RSI value should apply to ALL candles in that day
+    try:
+        # Normalize daily dates to midnight for proper date matching
+        daily_dates_normalized = pd.to_datetime(daily_dates).dt.normalize()
+        daily_rsi_series = pd.Series(daily_rsi, index=daily_dates_normalized)
+        
+        # Normalize main dates to midnight for matching
+        # Ensure df_dates has the correct length
+        if len(df_dates) != data_len:
+            print(f"extract_daily_rsi: Warning - df_dates length ({len(df_dates)}) doesn't match data_len ({data_len}), using data_len")
+            # If df_dates is wrong, we can't proceed - return error
+            if len(df_dates) < data_len:
+                print(f"extract_daily_rsi: Error - df_dates too short, cannot align")
+                return False, None
+        
+        # Use only the first data_len elements if df_dates is longer
+        df_dates_to_use = df_dates[:data_len] if len(df_dates) > data_len else df_dates
+        df_dates_normalized = pd.to_datetime(df_dates_to_use).dt.normalize()
+        
+        # Map each main date to its corresponding daily RSI value
+        # Use merge to ensure all bars on the same date get the same RSI value
+        df_main_with_dates = pd.DataFrame({
+            'date_normalized': df_dates_normalized,
+            'original_index': range(len(df_dates_normalized))
+        })
+        
+        df_daily_rsi = pd.DataFrame({
+            'date_normalized': daily_dates_normalized,
+            'daily_rsi': daily_rsi
+        })
+        
+        # Merge to get RSI for each date, then forward-fill any missing dates
+        df_merged = df_main_with_dates.merge(df_daily_rsi, on='date_normalized', how='left')
+        df_merged = df_merged.sort_values('original_index')
+        df_merged['daily_rsi'] = df_merged['daily_rsi'].ffill()  # Forward-fill any missing dates
+        
+        aligned_daily_rsi = df_merged['daily_rsi'].values
+        
+        # Ensure the result has the correct length (should match data_len)
+        if len(aligned_daily_rsi) != data_len:
+            print(f"extract_daily_rsi: Warning - aligned length ({len(aligned_daily_rsi)}) doesn't match data_len ({data_len}), adjusting")
+            if len(aligned_daily_rsi) > data_len:
+                aligned_daily_rsi = aligned_daily_rsi[:data_len]
+            else:
+                # Pad with NaN if shorter
+                aligned_daily_rsi = np.concatenate([aligned_daily_rsi, np.full(data_len - len(aligned_daily_rsi), np.nan)])
+        
+        print(f"extract_daily_rsi: Aligned daily RSI from {len(daily_rsi)} to {len(aligned_daily_rsi)} values")
+        non_nan_values = aligned_daily_rsi[~np.isnan(aligned_daily_rsi)]
+        if len(non_nan_values) > 0:
+            print(f"extract_daily_rsi: Daily RSI sample values: {non_nan_values[:5]}")
+    except Exception as e:
+        logger.exception(f"Failed to align daily RSI with main timeframe: {e}")
+        return False, None
+
+    if np.all(np.isnan(aligned_daily_rsi)):
+        print("extract_daily_rsi: All daily RSI values are NaN")
+        return False, None
+
+    print(f"extract_daily_rsi: Successfully extracted daily RSI with {np.sum(~np.isnan(aligned_daily_rsi))} non-NaN values")
+    return True, aligned_daily_rsi
+
+
+def calculate_rsi_manual(prices, period=14):
+    """
+    Manually calculate RSI from price array using Wilder's smoothing method.
+    This matches the standard RSI calculation used by most libraries.
+    This avoids backtrader's synchronization issues.
+    """
+    import pandas as pd
+    import numpy as np
+    
+    if len(prices) < period + 1:
+        return np.full(len(prices), np.nan)
+    
+    # Convert to pandas Series for easier calculation
+    prices_series = pd.Series(prices)
+    
+    # Calculate price changes
+    delta = prices_series.diff()
+    
+    # Separate gains and losses
+    gains = delta.where(delta > 0, 0.0)
+    losses = -delta.where(delta < 0, 0.0)
+    
+    # Calculate average gains and losses using Wilder's smoothing
+    # Wilder's method: First average = SMA, then: Avg = (Prev_Avg * (period - 1) + Current) / period
+    # This is equivalent to: alpha = 1/period, but we'll do it explicitly for clarity
+    avg_gains = gains.copy()
+    avg_losses = losses.copy()
+    
+    # First average is simple moving average
+    avg_gains.iloc[period] = gains.iloc[1:period+1].mean()
+    avg_losses.iloc[period] = losses.iloc[1:period+1].mean()
+    
+    # Subsequent averages use Wilder's smoothing
+    for i in range(period + 1, len(gains)):
+        avg_gains.iloc[i] = (avg_gains.iloc[i-1] * (period - 1) + gains.iloc[i]) / period
+        avg_losses.iloc[i] = (avg_losses.iloc[i-1] * (period - 1) + losses.iloc[i]) / period
+    
+    # Set first period values to NaN
+    avg_gains.iloc[:period] = np.nan
+    avg_losses.iloc[:period] = np.nan
+    
+    # Calculate RS and RSI
+    rs = avg_gains / avg_losses
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi.values
+
+
+
 # ============================================================
 # Figure creation
 # ============================================================
@@ -157,7 +328,15 @@ def create_base_figure(symbol: str, height: int, has_rsi: bool):
         paper_bgcolor="white",
         plot_bgcolor="white",
         font=dict(color="#2A2E39", size=12),
-        showlegend=False,
+        showlegend=True,  # Enable legend to show RSI
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=10),
+        ),
         xaxis_rangeslider_visible=False,
         # Enable zoom and pan controls
         dragmode="pan",  # Default to pan mode (can switch to zoom with toolbar)
@@ -188,7 +367,11 @@ def add_price(fig, df, has_rsi):
     fig.add_trace(trace, row=1 if has_rsi else None, col=1 if has_rsi else None)
 
 
-def add_rsi(fig, df, rsi):
+def add_rsi(fig, df, rsi, daily_rsi=None):
+    """
+    Add RSI line to the RSI subplot.
+    """
+    # Add regular RSI
     fig.add_trace(
         go.Scatter(
             x=df["date"],
@@ -196,14 +379,30 @@ def add_rsi(fig, df, rsi):
             mode="lines",
             line=dict(color="#2962FF", width=2),
             name="RSI",
+            showlegend=True,
         ),
         row=2,
         col=1,
     )
+    
+    # Add daily RSI if provided (will appear as a more static line)
+    if daily_rsi is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=df["date"],
+                y=daily_rsi,
+                mode="lines",
+                line=dict(color="#FF9800", width=2, dash="dash"),
+                name="Daily RSI",
+                showlegend=True,
+            ),
+            row=2,
+            col=1,
+        )
 
-    fig.add_hline(y=70, row=2, col=1, line_dash="dash", line_color="#F23645")
-    fig.add_hline(y=30, row=2, col=1, line_dash="dash", line_color="#089981")
-    fig.add_hline(y=50, row=2, col=1, line_dash="dot", line_color="#787B86")
+    # fig.add_hline(y=70, row=2, col=1, line_dash="dash", line_color="#F23645")
+    # fig.add_hline(y=30, row=2, col=1, line_dash="dash", line_color="#089981")
+    # fig.add_hline(y=50, row=2, col=1, line_dash="dot", line_color="#787B86")
 
 
 def add_ema(fig, df, ema, has_rsi):
@@ -225,11 +424,16 @@ def add_ema(fig, df, ema, has_rsi):
     )
 
 def apply_tradingview_style(fig, has_rsi: bool):
+    # Get current legend settings to preserve them
+    current_showlegend = getattr(fig.layout, 'showlegend', False)
+    current_legend = getattr(fig.layout, 'legend', None)
+    
     fig.update_layout(
         paper_bgcolor="white",
         plot_bgcolor="white",
         font=dict(color="#2A2E39", size=12),
-        showlegend=False,
+        showlegend=current_showlegend,  # Preserve legend visibility
+        legend=current_legend,  # Preserve legend settings
         hovermode="x" if SHOW_HOVER_LABELS else False,
     )
 
@@ -309,20 +513,70 @@ def add_support_resistance(fig, df, breakout_ind, has_rsi):
         )
 
 
-def add_breakouts(fig, df, breakout_ind, has_rsi):
-    prices = np.asarray(breakout_ind.lines.breakout.array)
-    mask = ~np.isnan(prices)
-
-    if not np.any(mask):
+def add_order_placements(fig, df, cerebro, symbol_index, has_rsi):
+    """
+    Add markers for candles where orders were placed.
+    Uses candle_data from cerebro to find candles with order_placed=True.
+    If order_datetime is stored in candle_data, use that for precise matching.
+    """
+    if not hasattr(cerebro, "candle_data"):
         return
-
+    
+    if symbol_index not in cerebro.candle_data:
+        return
+    
+    candle_data = cerebro.candle_data[symbol_index]
+    
+    # Find candles where order_placed is True
+    # Try to use stored order_datetime for precise matching, fall back to index-based matching
+    dates_to_plot = []
+    prices_to_plot = []
+    
+    for i, candle_dict in enumerate(candle_data):
+        if candle_dict.get('order_placed', False):
+            # If we have a stored datetime, try to match it precisely in the dataframe
+            stored_datetime = candle_dict.get('order_datetime')
+            if stored_datetime is not None:
+                # Convert stored_datetime to pandas Timestamp if needed
+                if not isinstance(stored_datetime, pd.Timestamp):
+                    if hasattr(stored_datetime, 'to_pydatetime'):
+                        stored_datetime = pd.Timestamp(stored_datetime.to_pydatetime())
+                    else:
+                        stored_datetime = pd.Timestamp(stored_datetime)
+                
+                # Find the closest matching datetime in the dataframe
+                time_diffs = (df["date"] - stored_datetime).abs()
+                closest_idx = time_diffs.idxmin()
+                closest_diff = time_diffs.iloc[closest_idx]
+                
+                # Only use if the difference is small (within 1 hour)
+                if closest_diff.total_seconds() < 3600:
+                    dates_to_plot.append(df["date"].iloc[closest_idx])
+                    prices_to_plot.append(df["close"].iloc[closest_idx])
+                else:
+                    # Fall back to index-based matching
+                    if i < len(df):
+                        dates_to_plot.append(df["date"].iloc[i])
+                        prices_to_plot.append(df["close"].iloc[i])
+            else:
+                # Fall back to index-based matching
+                if i < len(df):
+                    dates_to_plot.append(df["date"].iloc[i])
+                    prices_to_plot.append(df["close"].iloc[i])
+    
+    if not dates_to_plot:
+        return
+    
+    dates = pd.Series(dates_to_plot)
+    prices = pd.Series(prices_to_plot)
+    
     fig.add_trace(
         go.Scatter(
-            x=df["date"][mask],
-            y=prices[mask],
+            x=dates,
+            y=prices,
             mode="markers",
             marker=dict(symbol="diamond", size=14, color="black"),
-            name="Breakout",
+            name="Placed Order",
             hoverinfo="skip" if not SHOW_HOVER_LABELS else "x+y+name",
             showlegend=False,
         ),
@@ -516,6 +770,7 @@ def plotly_plot(
     df = build_ohlc_df(data)
 
     has_rsi, rsi = extract_rsi(strategy, len(df))
+    has_daily_rsi, daily_rsi = extract_daily_rsi(strategy, len(df), df["date"])
     has_ema, ema = extract_ema(strategy, len(df))
     fig = create_base_figure(symbol, height, has_rsi)
 
@@ -525,14 +780,19 @@ def plotly_plot(
         add_ema(fig, df, ema, has_rsi)
 
     if has_rsi:
-        add_rsi(fig, df, rsi)
+        # Debug: Log daily RSI extraction result
+        if has_daily_rsi:
+            logger.info(f"Daily RSI extracted successfully: {len(daily_rsi)} values, {np.sum(~np.isnan(daily_rsi))} non-NaN")
+        else:
+            logger.warning("Daily RSI extraction failed or returned no data")
+        add_rsi(fig, df, rsi, daily_rsi if has_daily_rsi else None)
 
     if hasattr(cerebro, "data_indicators"):
         indicators = cerebro.data_indicators[symbol_index]
         breakout = indicators.get("breakout") if indicators else None
 
         add_support_resistance(fig, df, breakout, has_rsi)
-        add_breakouts(fig, df, breakout, has_rsi)
+        add_order_placements(fig, df, cerebro, symbol_index, has_rsi)
 
     # Auto-extract orders from strategy if not provided
     if orders is None and strategy is not None:
