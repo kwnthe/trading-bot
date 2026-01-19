@@ -1,9 +1,37 @@
 import MetaTrader5 as mt5
 import pandas as pd
 import numpy as np
-import argparse
 from datetime import datetime, timedelta
+import sys
 from pathlib import Path
+
+# Import non-MT5 constants and utilities
+# Try relative import first (when used as module), then absolute (when run as script)
+try:
+    from .fetch_constants import (
+        DEFAULT_SYMBOL,
+        DEFAULT_MODE,
+        DEFAULT_START,
+        DEFAULT_END,
+        SCRIPT_DIR,
+        generate_csv_filename,
+        parse_datetime,
+    )
+except ImportError:
+    # If relative import fails, try absolute import (for script execution)
+    # Add the data directory to path if needed
+    _data_dir = Path(__file__).resolve().parent
+    if str(_data_dir) not in sys.path:
+        sys.path.insert(0, str(_data_dir))
+    from fetch_constants import (
+        DEFAULT_SYMBOL,
+        DEFAULT_MODE,
+        DEFAULT_START,
+        DEFAULT_END,
+        SCRIPT_DIR,
+        generate_csv_filename,
+        parse_datetime,
+    )
 
 # Example invocation:
 # python fetch_mt5.py \
@@ -14,21 +42,7 @@ from pathlib import Path
 
 
 # ============================================================================
-# DEFAULT CONFIGURATION (PERSISTED)
-# ============================================================================
-DEFAULT_SYMBOL    = "EURUSD"
-DEFAULT_TIMEFRAME = mt5.TIMEFRAME_H1
-DEFAULT_MODE      = "csv"
-DEFAULT_START     = datetime(2025, 12, 1)
-DEFAULT_END       = datetime(2025, 12, 16)
-
-# ============================================================================
-# SCRIPT DIRECTORY (ALWAYS SAVE FILES HERE)
-# ============================================================================
-SCRIPT_DIR = Path(__file__).resolve().parent
-
-# ============================================================================
-# TIMEFRAME MAP
+# MT5 TIMEFRAME MAPPING (maps string timeframes to MT5 constants)
 # ============================================================================
 TIMEFRAME_MAP = {
     "M1": mt5.TIMEFRAME_M1,
@@ -42,15 +56,14 @@ TIMEFRAME_MAP = {
     "MN1": mt5.TIMEFRAME_MN1,
 }
 
+DEFAULT_TIMEFRAME = mt5.TIMEFRAME_H1
+
 def get_timeframe_string(timeframe):
     """Convert MT5 timeframe constant to string representation."""
     # Create reverse mapping
     reverse_map = {v: k for k, v in TIMEFRAME_MAP.items()}
     return reverse_map.get(timeframe, "H1")  # Default to H1 if not found
 
-def generate_csv_filename(symbol: str, timeframe, start_date: datetime, end_date: datetime):
-    """Generate CSV filename from symbol, timeframe, and date range."""
-    return f"{symbol}_{timeframe}_{start_date.date()}_{end_date.date()}.csv"
 
 # ============================================================================
 # SYMBOL HANDLING
@@ -128,10 +141,10 @@ def fetch_candles(mode, start, end, symbol, timeframe):
 
     if mode == "csv":
         tf = get_timeframe_string(timeframe)
-        output_path = (
-            SCRIPT_DIR
-            / generate_csv_filename(symbol, tf, start, end)
-        )
+        # Save to data/backtests/ directory to match backtesting.py expectations
+        output_dir = SCRIPT_DIR / "backtests"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / generate_csv_filename(symbol, tf, start, end)
         df.to_csv(output_path, index=False)
         return {
             "success": True,
@@ -141,18 +154,6 @@ def fetch_candles(mode, start, end, symbol, timeframe):
 
     return df
 
-# ============================================================================
-# DATE PARSER
-# ============================================================================
-def parse_datetime(value):
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(value, fmt)
-        except ValueError:
-            pass
-    raise argparse.ArgumentTypeError(
-        "Date must be YYYY-MM-DD or YYYY-MM-DD HH:MM"
-    )
 
 # ============================================================================
 # CLI
@@ -170,8 +171,8 @@ def main():
 
     parser.add_argument(
         "--timeframe",
-        choices=TIMEFRAME_MAP.keys(),
-        default=get_timeframe_string(DEFAULT_TIMEFRAME),
+        choices=list(TIMEFRAME_MAP.keys()),
+        default="H1",
         help="Timeframe (default: H1)",
     )
 

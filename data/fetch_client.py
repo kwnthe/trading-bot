@@ -20,9 +20,8 @@ import argparse
 import requests
 import sys
 from pathlib import Path
-from datetime import datetime
 
-from fetch import TIMEFRAME_MAP, DEFAULT_SYMBOL, DEFAULT_TIMEFRAME, DEFAULT_START, DEFAULT_END, parse_datetime
+from fetch_constants import TIMEFRAME_MAP, DEFAULT_SYMBOL, DEFAULT_START, DEFAULT_END, parse_datetime
 
 
 def fetch_from_server(server_url, symbol, timeframe, start, end, output_path=None):
@@ -78,6 +77,21 @@ def fetch_from_server(server_url, symbol, timeframe, start, end, output_path=Non
         # Save CSV file
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(response.content)
+        
+        # Verify the CSV file was created and has content
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise RuntimeError(f"CSV file was not created or is empty: {output_path}")
+        
+        # Quick validation: check if CSV has expected columns
+        try:
+            import pandas as pd
+            test_df = pd.read_csv(output_path, nrows=1)
+            if 'time' not in test_df.columns and 'datetime' not in test_df.columns and 'timestamp' not in test_df.columns:
+                raise RuntimeError(f"CSV file does not contain a time/datetime column. Found columns: {list(test_df.columns)}")
+        except Exception as e:
+            # If validation fails, log but don't fail - let the CSV reader handle it
+            import warnings
+            warnings.warn(f"CSV validation warning: {e}")
         
         return output_path
         

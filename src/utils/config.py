@@ -52,6 +52,10 @@ class Configuration(BaseSettings):
     # Indicators
     ema_length: int = Field(default=9)
 
+    # Mac remote fetching of csv data
+    backtest_fetch_csv_url: Optional[str] = Field(default=None)  # URL of the fetch server
+
+    
     class Config:
         env_file = ".env"
 

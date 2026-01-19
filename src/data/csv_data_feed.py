@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 from loguru import logger
 import os
+from pathlib import Path
 
 
 class CSVDataFeed:
@@ -159,7 +160,14 @@ class CSVDataFeed:
             df['time'] = pd.to_datetime(df['time'])
             df.set_index('time', inplace=True)
         else:
-            raise ValueError("No time/datetime column found in CSV")
+            # Provide helpful error message with actual columns found
+            actual_columns = list(df.columns) if not df.empty else "CSV file is empty"
+            raise ValueError(
+                f"No time/datetime column found in CSV file: {self.csv_file_path}\n"
+                f"Expected columns: ['time', 'open', 'high', 'low', 'close']\n"
+                f"Actual columns: {actual_columns}\n"
+                f"CSV file size: {Path(self.csv_file_path).stat().st_size if Path(self.csv_file_path).exists() else 'file not found'} bytes"
+            )
         
         # Rename columns to match Backtrader expectations
         column_mapping = {

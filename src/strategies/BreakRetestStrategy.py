@@ -28,7 +28,7 @@ class BreakRetestStrategy(BaseStrategy):
     # ----------------------- NEXT -----------------------  
     def next(self):  
         current_bar_time = self.data.datetime.datetime(0)
-        if self.candle_index == 189 or self.candle_index == 190 or self.candle_index == 191 or self.candle_index == 192:
+        if self.candle_index >= 464 and self.candle_index <= 472:
             data_state = self._get_data_state()
             support = data_state[0]['support']
             resistance = data_state[0]['resistance']
