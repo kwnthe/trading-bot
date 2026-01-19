@@ -21,7 +21,7 @@ import requests
 import sys
 from pathlib import Path
 
-from fetch_constants import TIMEFRAME_MAP, DEFAULT_SYMBOL, DEFAULT_START, DEFAULT_END, parse_datetime
+from .fetch_constants import TIMEFRAME_MAP, DEFAULT_SYMBOL, DEFAULT_START, DEFAULT_END, parse_datetime
 
 
 def fetch_from_server(server_url, symbol, timeframe, start, end, output_path=None):

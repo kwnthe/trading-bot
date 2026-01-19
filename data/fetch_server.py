@@ -17,8 +17,8 @@ import argparse
 from pathlib import Path
 import traceback
 
-from fetch import fetch_candles, TIMEFRAME_MAP
-from fetch_constants import parse_datetime, DEFAULT_SYMBOL, DEFAULT_START, DEFAULT_END
+from .fetch import fetch_candles, TIMEFRAME_MAP
+from .fetch_constants import parse_datetime, DEFAULT_SYMBOL, DEFAULT_START, DEFAULT_END
 
 app = Flask(__name__)
 
