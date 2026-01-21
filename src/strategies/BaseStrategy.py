@@ -31,6 +31,7 @@ class BaseStrategy(bt.Strategy):
         self.open_positions_summary = {} # Tracks the current position on each data feed
         self.trades = {}
         self.logger = StrategyLogger.get_logger()
+        self.mode = Config.mode
         
         # Get cerebro to access daily_data_mapping
         cerebro = getattr(self.broker, '_owner', None)
@@ -98,6 +99,12 @@ class BaseStrategy(bt.Strategy):
                 # Each list contains dicts, one per candle, storing arbitrary data (e.g., {'order_placed': True})
                 # This data can be extracted by plot.py for visualization
                 cerebro.candle_data = {}
+            if not hasattr(cerebro, 'chart_markers'):
+                # Chart markers storage: dict of dicts, one dict per data feed ID
+                # Each dict maps candle_index -> marker info (price, type, etc.)
+                # Example: {0: {100: {'price': 50000.0, 'type': ChartMarkerType.RETEST_ORDER_PLACED}, 150: {'price': 51000.0, 'type': ChartMarkerType.RETEST_ORDER_PLACED}}}
+                # Structure: {data_feed_index: {candle_index: {'price': float, 'type': str, ...}}}
+                cerebro.chart_markers = {}
             
             # Initialize indicators for all data feeds
             # Get daily data mapping if available
@@ -130,10 +137,12 @@ class BaseStrategy(bt.Strategy):
                     }
                 if original_data_index not in cerebro.candle_data:
                     cerebro.candle_data[original_data_index] = []
+                if original_data_index not in cerebro.chart_markers:
+                    cerebro.chart_markers[original_data_index] = {}
                 
                 original_data_index += 1
             
-            # Store SupportResistances indicators in self.indicators for cleaner access
+            # Store Zones indicators in self.indicators for cleaner access
             # For backward compatibility, keep main indicators pointing to first data feed
             if 0 in cerebro.data_indicators:
                 self.breakout_indicator = cerebro.data_indicators[0]['breakout']
@@ -166,6 +175,9 @@ class BaseStrategy(bt.Strategy):
         self.initial_cash = self.broker.getvalue()
         self.current_cash = self.initial_cash
     
+    def _is_backtesting(self):
+        return self.mode == 'backtest'
+        
     def _get_cerebro(self):
         """Get cerebro instance from broker."""
         cerebro = getattr(self.broker, '_owner', None)
@@ -243,12 +255,16 @@ class BaseStrategy(bt.Strategy):
                     self.broker.data_state = {}
                 if not hasattr(self.broker, 'candle_data'):
                     self.broker.candle_data = {}
+                if not hasattr(self.broker, 'chart_markers'):
+                    self.broker.chart_markers = {}
                 self.broker.data_state[i] = self.broker.data_state.get(i, {})
                 self.broker.data_state[i]['just_broke_out'] = just_broke_out
                 self.broker.data_state[i]['breakout_trend'] = breakout_trend
                 self.broker.data_state[i]['support'] = support
                 self.broker.data_state[i]['resistance'] = resistance
                 self.broker.candle_data[i] = candle_data.get(i, [])
+                if i not in self.broker.chart_markers:
+                    self.broker.chart_markers[i] = {}
         
         # Get updated state
         data_state = self._get_data_state()
@@ -794,6 +810,84 @@ class BaseStrategy(bt.Strategy):
         candle_data = self._get_candle_data()
         if data_feed_index in candle_data and candle_data[data_feed_index]:
             return candle_data[data_feed_index][-1].get(key, default)
+        return default
+    
+    def _get_chart_markers(self):
+        """Get chart_markers from cerebro or broker fallback."""
+        cerebro = self._get_cerebro()
+        if cerebro is not None and hasattr(cerebro, 'chart_markers'):
+            return cerebro.chart_markers
+        elif hasattr(self.broker, 'chart_markers'):
+            return self.broker.chart_markers
+        return {}
+    
+    def set_chart_marker(self, candle_index: int, price: float, data_feed_index: int = 0, marker_type: str = 'diamond', **kwargs):
+        """
+        Set a chart marker at a specific candle index and price level.
+        This marker will be displayed on the plot.
+        
+        Args:
+            candle_index: The candle index (0-based) where to show the marker
+            price: The price level where to show the marker
+            data_feed_index: Index of the data feed (0 for first symbol, 1 for second, etc.)
+            marker_type: Type of marker ('diamond', 'circle', 'square', etc.) - defaults to 'diamond'
+            **kwargs: Additional marker properties (color, size, etc.) for future extensibility
+        
+        Example:
+            # Set a diamond at candle 100 at price 50000 for the first data feed
+            self.set_chart_marker(100, 50000.0)
+            
+            # Set a diamond at current candle index at current close price
+            self.set_chart_marker(self.candle_index, self.data.close[0])
+            
+            # Set a marker for a specific data feed
+            self.set_chart_marker(150, 51000.0, data_feed_index=1)
+            
+            # Set a different marker type
+            self.set_chart_marker(200, 52000.0, marker_type='circle', color='red')
+        """
+        cerebro = self._get_cerebro()
+        marker_info = {
+            'price': price,
+            'type': marker_type,
+            **kwargs  # Allow additional properties
+        }
+        
+        if cerebro is not None:
+            if not hasattr(cerebro, 'chart_markers'):
+                cerebro.chart_markers = {}
+            if data_feed_index not in cerebro.chart_markers:
+                cerebro.chart_markers[data_feed_index] = {}
+            cerebro.chart_markers[data_feed_index][candle_index] = marker_info
+        else:
+            # Fallback to broker if cerebro not available
+            if not hasattr(self.broker, 'chart_markers'):
+                self.broker.chart_markers = {}
+            if data_feed_index not in self.broker.chart_markers:
+                self.broker.chart_markers[data_feed_index] = {}
+            self.broker.chart_markers[data_feed_index][candle_index] = marker_info
+    
+    def get_chart_marker(self, candle_index: int, data_feed_index: int = 0, default=None):
+        """
+        Get chart marker info for a specific candle index.
+        
+        Args:
+            candle_index: The candle index (0-based) to retrieve marker for
+            data_feed_index: Index of the data feed (0 for first symbol, 1 for second, etc.)
+            default: Default value if marker not found
+        
+        Returns:
+            Dict with marker info (price, type, etc.) or default if not found
+        
+        Example:
+            # Get marker for candle 100
+            marker = self.get_chart_marker(100)
+            if marker:
+                print(f"Price: {marker['price']}, Type: {marker['type']}")
+        """
+        chart_markers = self._get_chart_markers()
+        if data_feed_index in chart_markers and candle_index in chart_markers[data_feed_index]:
+            return chart_markers[data_feed_index][candle_index]
         return default
     
     def update_open_positions_summary(self):

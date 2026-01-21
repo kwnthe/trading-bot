@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from src.models.chart_markers import ChartMarkerType
 
 logger = logging.getLogger(__name__)
 
@@ -515,74 +516,107 @@ def add_support_resistance(fig, df, breakout_ind, has_rsi):
 
 def add_order_placements(fig, df, cerebro, symbol_index, has_rsi):
     """
-    Add markers for candles where orders were placed.
-    Uses candle_data from cerebro to find candles with order_placed=True.
-    If order_datetime is stored in candle_data, use that for precise matching.
+    Add chart markers set via strategy.set_chart_marker().
+    
+    Chart markers are stored in cerebro.chart_markers[symbol_index] as a dict
+    mapping candle_index -> marker_info (price, type, color, size, etc.).
     """
-    if not hasattr(cerebro, "candle_data"):
+    # Check if chart markers exist for this symbol
+    if not (hasattr(cerebro, "chart_markers") and symbol_index in cerebro.chart_markers):
         return
     
-    if symbol_index not in cerebro.candle_data:
+    chart_markers = cerebro.chart_markers[symbol_index]
+    if not chart_markers:
         return
     
-    candle_data = cerebro.candle_data[symbol_index]
+    # Symbol mapping for plotly
+    symbol_map = {
+        'diamond': 'diamond',
+        'circle': 'circle',
+        'square': 'square',
+        'triangle-up': 'triangle-up',
+        'triangle-down': 'triangle-down',
+        'star': 'star',
+        'x': 'x',
+        ChartMarkerType.RETEST_ORDER_PLACED: 'diamond',  # Map enum value to symbol
+    }
     
-    # Find candles where order_placed is True
-    # Try to use stored order_datetime for precise matching, fall back to index-based matching
+    # Collect marker data
     dates_to_plot = []
     prices_to_plot = []
+    marker_symbols = []
+    marker_colors = []
+    marker_sizes = []
     
-    for i, candle_dict in enumerate(candle_data):
-        if candle_dict.get('order_placed', False):
-            # If we have a stored datetime, try to match it precisely in the dataframe
-            stored_datetime = candle_dict.get('order_datetime')
-            if stored_datetime is not None:
-                # Convert stored_datetime to pandas Timestamp if needed
-                if not isinstance(stored_datetime, pd.Timestamp):
-                    if hasattr(stored_datetime, 'to_pydatetime'):
-                        stored_datetime = pd.Timestamp(stored_datetime.to_pydatetime())
-                    else:
-                        stored_datetime = pd.Timestamp(stored_datetime)
-                
-                # Find the closest matching datetime in the dataframe
-                time_diffs = (df["date"] - stored_datetime).abs()
-                closest_idx = time_diffs.idxmin()
-                closest_diff = time_diffs.iloc[closest_idx]
-                
-                # Only use if the difference is small (within 1 hour)
-                if closest_diff.total_seconds() < 3600:
-                    dates_to_plot.append(df["date"].iloc[closest_idx])
-                    prices_to_plot.append(df["close"].iloc[closest_idx])
-                else:
-                    # Fall back to index-based matching
-                    if i < len(df):
-                        dates_to_plot.append(df["date"].iloc[i])
-                        prices_to_plot.append(df["close"].iloc[i])
-            else:
-                # Fall back to index-based matching
-                if i < len(df):
-                    dates_to_plot.append(df["date"].iloc[i])
-                    prices_to_plot.append(df["close"].iloc[i])
+    for candle_index, marker_info in chart_markers.items():
+        # In backtrader, self.candle_index = len(self.data) during next()
+        # len(self.data) is 1-based (e.g., 1 for first bar, 2 for second bar)
+        # But dataframe index is 0-based (0 for first bar, 1 for second bar)
+        # So we need to subtract 1 to convert from 1-based to 0-based
+        # Exception: if candle_index is 0, it might already be 0-based, so use it as-is
+        df_index = candle_index - 1 if candle_index > 0 else candle_index
+        
+        # Validate df_index is within dataframe bounds
+        if not (0 <= df_index < len(df)):
+            continue
+        
+        dates_to_plot.append(df["date"].iloc[df_index])
+        prices_to_plot.append(marker_info.get('price'))
+        
+        # Get marker properties with defaults
+        marker_type = marker_info.get('type', 'diamond')
+        marker_color = marker_info.get('color', 'black')
+        marker_size = marker_info.get('size', 14)
+        
+        # Map marker type to plotly symbol (handle enum values by converting to string)
+        if hasattr(marker_type, 'value'):
+            marker_type = marker_type.value
+        elif hasattr(marker_type, 'name'):
+            marker_type = marker_type.name
+        marker_type = str(marker_type).lower()
+        
+        plotly_symbol = symbol_map.get(marker_type, 'diamond')
+        
+        marker_symbols.append(plotly_symbol)
+        marker_colors.append(marker_color)
+        marker_sizes.append(marker_size)
     
     if not dates_to_plot:
         return
     
-    dates = pd.Series(dates_to_plot)
-    prices = pd.Series(prices_to_plot)
+    # Deduplicate markers based on datetime to avoid duplicates
+    seen_datetimes = set()
+    deduplicated_data = []
+    for date, price, symbol, color, size in zip(dates_to_plot, prices_to_plot, marker_symbols, marker_colors, marker_sizes):
+        date_key = date if isinstance(date, pd.Timestamp) else pd.Timestamp(date)
+        if date_key not in seen_datetimes:
+            seen_datetimes.add(date_key)
+            deduplicated_data.append((date, price, symbol, color, size))
     
-    fig.add_trace(
-        go.Scatter(
-            x=dates,
-            y=prices,
-            mode="markers",
-            marker=dict(symbol="diamond", size=14, color="black"),
-            name="Placed Order",
-            hoverinfo="skip" if not SHOW_HOVER_LABELS else "x+y+name",
-            showlegend=False,
-        ),
-        row=1 if has_rsi else None,
-        col=1 if has_rsi else None,
-    )
+    # Group markers by symbol/color/size to create separate traces for better visualization
+    marker_groups = {}
+    for date, price, symbol, color, size in deduplicated_data:
+        key = (symbol, color, size)
+        if key not in marker_groups:
+            marker_groups[key] = {'dates': [], 'prices': []}
+        marker_groups[key]['dates'].append(date)
+        marker_groups[key]['prices'].append(price)
+    
+    # Add a trace for each unique marker configuration
+    for (symbol, color, size), group in marker_groups.items():
+        fig.add_trace(
+            go.Scatter(
+                x=group['dates'],
+                y=group['prices'],
+                mode="markers",
+                marker=dict(symbol=symbol, size=size, color=color),
+                name="Placed Order" if symbol == 'diamond' and color == 'black' else f"Marker ({symbol})",
+                hoverinfo="skip" if not SHOW_HOVER_LABELS else "x+y+name",
+                showlegend=False,
+            ),
+            row=1 if has_rsi else None,
+            col=1 if has_rsi else None,
+        )
 
 
 def add_orders(fig, orders: Iterable[dict], has_rsi: bool = False):

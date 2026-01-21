@@ -14,7 +14,7 @@ resistance_config['color'] = '#E91E63'
 clear_support_after_bars = 1
 clear_resistance_after_bars = 1
 
-class SupportResistances(bt.Indicator):
+class Zones(bt.Indicator):
     lines = ('resistance1', 'support1')
     plotinfo = dict(plot=True, subplot=False, plotmaster=None, plotabove=True, plotname='Support/Resistance')
     plotlines = dict(
@@ -44,7 +44,6 @@ class SupportResistances(bt.Indicator):
             return
 
         try:
-            previous_candle = Candlestick.from_bt(self.data, -1)
             current_candle = Candlestick.from_bt(self.data, 0)
 
             continuous_movement_data = get_total_movement_from_continuous_candles(self.data, 0, self.candle_index, self.symbol, skip_small_movements=True)
@@ -70,17 +69,53 @@ class SupportResistances(bt.Indicator):
             # for i in range(0, last_opposite_candle_index - 1, - 1):
             for i in range(0, -1, - 1): # run one time
                 if current_candle.candle_type == CandleType.BEARISH and math.isnan(self.lines.resistance1[i]):
-                # if current_candle.candle_type == CandleType.BEARISH:
                     self.lines.resistance1[i] = continuous_movement_high + self.sr_padding
-                # elif current_candle.candle_type == CandleType.BULLISH:
+                    if self.lines.resistance1[i] <= self.lines.support1[i]:
+                        self.lines.support1[i] = float('nan')
                 if current_candle.candle_type == CandleType.BULLISH and math.isnan(self.lines.support1[i]):
                     self.lines.support1[i] = continuous_movement_low - self.sr_padding
-        # the bug is extend srs
-        # TODO extend srs if we have a break
-        # What we show isnt correct. we need to show the support the moment we recognize it
+                    if self.lines.support1[i] >= self.lines.resistance1[i]:
+                        self.lines.resistance1[i] = float('nan')
+            
+        # Extend S/R from previous bar if current bar has nan values
+        # This ensures S/R levels persist across bars until new ones are detected
+        # We validate to ensure support < resistance to handle weekend gaps and extreme moves
         if self.extend_srs:
+            # Track which values were extended (vs set this bar)
+            support_was_extended = False
+            resistance_was_extended = False
+            
+            # Extend support if it's nan and previous support exists
             if math.isnan(self.lines.support1[0]) and not math.isnan(self.lines.support1[-1]):
                 self.lines.support1[0] = self.lines.support1[-1]
+                support_was_extended = True
+            
+            # Extend resistance if it's nan and previous resistance exists
             if math.isnan(self.lines.resistance1[0]) and not math.isnan(self.lines.resistance1[-1]):
                 self.lines.resistance1[0] = self.lines.resistance1[-1]
-
+                resistance_was_extended = True
+            
+            # Validate: support must be < resistance (both must be valid numbers)
+            # If validation fails, clear the conflicting value to avoid invalid state
+            if not math.isnan(self.lines.support1[0]) and not math.isnan(self.lines.resistance1[0]):
+                if self.lines.support1[0] >= self.lines.resistance1[0]:
+                    # Invalid state: support >= resistance
+                    # Prefer keeping the value that was set this bar (not extended)
+                    # If both were extended, clear the one further from current price
+                    if support_was_extended and not resistance_was_extended:
+                        # Support was extended, resistance was set this bar - clear support
+                        self.lines.support1[0] = float('nan')
+                    elif resistance_was_extended and not support_was_extended:
+                        # Resistance was extended, support was set this bar - clear resistance
+                        self.lines.resistance1[0] = float('nan')
+                    else:
+                        # Both were extended or both were set this bar
+                        # Clear the one further from current price (less relevant)
+                        current_price = self.data.close[0]
+                        support_distance = abs(self.lines.support1[0] - current_price)
+                        resistance_distance = abs(self.lines.resistance1[0] - current_price)
+                        if support_distance > resistance_distance:
+                            self.lines.support1[0] = float('nan')
+                        else:
+                            self.lines.resistance1[0] = float('nan')
+        

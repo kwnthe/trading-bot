@@ -1,6 +1,6 @@
 import backtrader as bt
 import numpy as np
-from indicators import SupportResistances
+from indicators import Zones
 from src.models.trend import Trend
 from src.utils.config import Config
 from src.models.candlestick import CandleType, Candlestick
@@ -8,7 +8,7 @@ from src.utils.strategy_utils.general_utils import convert_micropips_to_price, c
 from src.models.s_r import SR, SRLevelType
 from src.utils.environment_variables import EnvironmentVariables
 
-class BreakoutIndicator(SupportResistances):
+class BreakoutIndicator(Zones):
     lines = ('breakout', 'breakout_trend')
     plotinfo = dict(plot=True, subplot=False, plotmaster=None, plotabove=True, plotname='Breakout')
         

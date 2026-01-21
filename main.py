@@ -19,8 +19,22 @@ from src.observers.buy_sell_observer import BuySellObserver
 from src.utils.backtesting import prepare_backtesting
 from src.models.timeframe import Timeframe
 from src.utils.plot import plotly_plot
+from src.brokers.backtesting_broker import BacktestingBroker
+from src.utils.strategy_utils.general_utils import convert_pips_to_price, convert_micropips_to_price
 
-def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, end_date: datetime, max_candles: int = None, print_trades: bool = False):
+def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, end_date: datetime, max_candles: int = None, print_trades: bool = False, spread_pips: float = 0.0):
+    """
+    Run backtesting with optional spread simulation.
+    
+    Args:
+        symbols: List of symbols to trade
+        timeframe: Timeframe for trading
+        start_date: Start date for backtesting
+        end_date: End date for backtesting
+        max_candles: Maximum number of candles to process
+        print_trades: Whether to print trade details
+        spread_pips: Spread in pips (default: 0.0 for no spread)
+    """
     symbols_list = prepare_backtesting(symbols, timeframe, start_date, end_date)
     print(f"symbols_list: {symbols_list}")
 
@@ -30,7 +44,7 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
     # Initialize persistent state in cerebro (survives strategy re-instantiation)
     cerebro.data_indicators = {}
     cerebro.data_state = {}
-    # cerebro.broker = BacktestingBroker()
+    cerebro.broker = BacktestingBroker(spread_pips=spread_pips)
     
     data_feeds = []
     data_for_plotly = {}
@@ -89,18 +103,13 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
         print(f"    Price range: {summary['price_range']['min']:.5f} to {summary['price_range']['max']:.5f}")
     print()
     
-    # Add the Break & Retest strategy with the SR indicator
-    # Use very large lot size for testing - this will drain the account quickly
     cerebro.addstrategy(BreakRetestStrategy, symbol=symbol, rr=Config.rr)
     cerebro.addindicator(TestIndicator)
     
     
     
     cerebro.broker.setcommission(commission=0.00008)
-    # cerebro.broker.setcommission(commission=0)
     cerebro.broker.set_checksubmit(False)  # Disable order size checks
-    
-    # Set cash for the account
     cerebro.broker.set_cash(Config.initial_equity)
     
     initial_cash = cerebro.broker.getcash()
@@ -192,8 +201,33 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
         print()
         print('EXECUTION COSTS')
         print('=' * 80)
-        print(f'Avg Entry Slippage: {avg_entry_slippage:.5f} ({avg_entry_slippage / 0.0001:.2f} pips)')
-        print(f'Avg Close Slippage: {avg_close_slippage:.5f} ({avg_close_slippage / 0.0001:.2f} pips)')
+        # Convert slippage to pips based on symbol type using utility functions
+        symbol = cerebro.backtest_metadata.get('symbol', '')
+        
+        # Helper function to get pip value for a symbol (inverse of conversion functions)
+        def get_pip_value(symbol: str) -> float:
+            """
+            Get pip value for a symbol (price per pip).
+            Uses utility functions to avoid hardcoding values.
+            """
+            symbol_upper = symbol.upper()
+            if symbol_upper.startswith("XAU") or symbol_upper.startswith("XAG"):
+                # Metals: 1 pip = 0.001 (same as 1 micropip for metals)
+                return convert_micropips_to_price(1.0, symbol)
+            elif symbol_upper.endswith("JPY"):
+                # JPY pairs: 1 pip = 0.01 (which is 10 micropips)
+                # convert_micropips_to_price(10.0, symbol) = 10 * 0.001 = 0.01
+                return convert_micropips_to_price(10.0, symbol)
+            else:
+                # Standard forex: 1 pip = 0.0001
+                return convert_pips_to_price(1.0)
+        
+        pip_value = get_pip_value(symbol) if symbol else convert_pips_to_price(1.0)
+        entry_slippage_pips = avg_entry_slippage / pip_value if pip_value > 0 else 0
+        close_slippage_pips = avg_close_slippage / pip_value if pip_value > 0 else 0
+        
+        print(f'Avg Entry Slippage: {avg_entry_slippage:.5f} ({entry_slippage_pips:.2f} pips)')
+        print(f'Avg Close Slippage: {avg_close_slippage:.5f} ({close_slippage_pips:.2f} pips)')
         print(f'Total Slippage Cost: ${total_slippage_all:.2f}')
         
         # Get execution stats from broker if using realistic execution
@@ -689,6 +723,8 @@ if __name__ == '__main__':
     parser.add_argument('-ch', '--chart', action='store_true',
                         help='Show chart')
     parser.add_argument('-mc', '--max-candles', type=int, help='Max Candles (backtesting only)', default=None)
+    parser.add_argument('--spread-pips', type=float, default=0.0,
+                        help='Spread in pips for backtesting (default: 0.0 for no spread)')
     
     
     
@@ -698,7 +734,7 @@ if __name__ == '__main__':
     if args.metatrader:
         live_trading()
     else:
-        results = backtesting(args.symbols, args.timeframe, args.start_date, args.end_date, max_candles=args.max_candles)
+        results = backtesting(args.symbols, args.timeframe, args.start_date, args.end_date, max_candles=args.max_candles, spread_pips=args.spread_pips)
         cerebro = results['cerebro']
         data = results['data']
         stats = results['stats']

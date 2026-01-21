@@ -14,7 +14,6 @@ VALID_TRADING_MODES = {"backtest", "live"}
 class Configuration(BaseSettings):
     price_precision: int = Field(..., ge=1, le=10)
     volume_precision: int = Field(..., ge=1, le=10)
-    live_mode: bool = Field(default=False)
     mode: Literal["backtest", "live"]
     market_type: Literal["forex", "crypto", "stocks"]
     breakout_lookback_period: int = Field(..., ge=1, le=1000000) # Candlestick count
@@ -70,7 +69,7 @@ class Configuration(BaseSettings):
 def load_config() -> Configuration:
     try:
         config = Configuration()
-        config.live_mode = "-m" in sys.argv
+        config.mode = "live" if "-m" in sys.argv else "backtest"
         return config
     except ValidationError as e:
         print("❌ Configuration Error: Missing or invalid required environment variables!")

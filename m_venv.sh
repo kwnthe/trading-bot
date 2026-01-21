@@ -1,2 +1,5 @@
 #!/bin/bash
-source venvs/m_venv/bin/activate
+# Activate the virtual environment
+source m_venv/bin/activate
+# Clear command hash to ensure venv's python is used
+hash -r

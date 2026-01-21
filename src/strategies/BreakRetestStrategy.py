@@ -8,7 +8,7 @@ from infrastructure import LogLevel, RepositoryName
 from src.utils.environment_variables import EnvironmentVariables
 from src.utils.trade_confirmations import RSIConfirmations
 import uuid
-import math
+from src.models.chart_markers import ChartMarkerType
 
 class BreakRetestStrategy(BaseStrategy):
     params = BaseStrategy._base_params + ()
@@ -33,7 +33,7 @@ class BreakRetestStrategy(BaseStrategy):
             support = data_state[0]['support']
             resistance = data_state[0]['resistance']
             print(f"current price: {self.data.close[0]}, current bar num: {self.candle_index}, current bar time: {current_bar_time}, resistance: {resistance}, support: {support}")
-        is_backfilling_live_mode = Config.live_mode and not getattr(self.data, 'live_mode', False)
+        is_backfilling_live_mode = not self._is_backtesting() and not getattr(self.data, 'live_mode', False)
         
         # Check if we've already processed this timestamp (prevent duplicate calls)
         # Use timestamp only since bar numbers can change between runs
@@ -82,18 +82,21 @@ class BreakRetestStrategy(BaseStrategy):
                 'resistance': format_price(pair_state['resistance']),
                 'breakout_trend': f'<b>{str(pair_state['breakout_trend'])}</b>' if pair_state['breakout_trend'] is not None else '',
             }
-            self.log_to_repo(LogLevel.INFO, f"<b>[{data_indicators[i]['symbol']}={format_price(current_price)}]</b> {'(Backfill)' if is_backfilling_live_mode else '(Live)'}: {log_dict}", RepositoryName.ZONES, date=current_bar_time)
+            self.log_to_repo(LogLevel.INFO, f"<b>[{data_indicators[i]['symbol']}={format_price(current_price)}]</b> ({'Backtesting' if self._is_backtesting() else 'Backfill' if is_backfilling_live_mode else 'Live'}): {log_dict}", RepositoryName.ZONES, date=current_bar_time)
             daily_rsi = self.indicators['daily_rsi'][0] if self.indicators['daily_rsi'] is not None else None
             order_confirmations = [
                 pair_state['just_broke_out'],
-                # self.indicators['ema'][0] <= current_price if pair_state['breakout_trend'] == Trend.UPTREND else \
-                #     self.indicators['ema'][0] >= current_price,
+                # We don't have a current pending limit order on the same symbol and the same zone
+                
+                self.indicators['ema'][0] <= current_price if pair_state['breakout_trend'] == Trend.UPTREND else \
+                    self.indicators['ema'][0] >= current_price,
                 RSIConfirmations.daily_rsi_allows_trade(daily_rsi, pair_state['breakout_trend']) if Config.check_for_daily_rsi else True,
             ]
             if not is_backfilling_live_mode and all(order_confirmations):
                 # Get the data feed for this symbol
                 data = data_indicators[i]['data']
                 self.place_retest_order_for_data(i)
+                self.set_chart_marker(self.candle_index, current_price, data_feed_index=i, marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
             self.invalidate_pending_trades_if_sr_changed_or_completed(i)  
 
     def place_retest_order_for_data(self, data_index):  
@@ -418,12 +421,21 @@ class BreakRetestStrategy(BaseStrategy):
                     self.trades[order.trade_id]['open_datetime'] = current_datetime
                     self.trades[order.trade_id]['entry_executed_price'] = order.executed.price
                     self.trades[order.trade_id]['state'] = TradeState.RUNNING
+                    
+                    # Calculate entry slippage (difference between order price and executed price)
+                    entry_price = self.trades[order.trade_id].get('entry_price')
+                    if entry_price is not None and order.executed.price is not None:
+                        entry_slippage = abs(order.executed.price - entry_price)
+                        self.trades[order.trade_id]['entry_slippage'] = entry_slippage
+                    
                     # Also update trade_record reference if it's the same object
                     if trade_record.get('trade_id') == order.trade_id:
                         trade_record['open_candle'] = self.candle_index
                         trade_record['open_datetime'] = current_datetime
                         trade_record['entry_executed_price'] = order.executed.price
                         trade_record['state'] = TradeState.RUNNING
+                        if 'entry_slippage' in self.trades[order.trade_id]:
+                            trade_record['entry_slippage'] = self.trades[order.trade_id]['entry_slippage']
                 
                 symbol = trade_record.get('symbol', '')
                 symbol_str = f"[{symbol}] " if symbol else ""
@@ -513,6 +525,38 @@ class BreakRetestStrategy(BaseStrategy):
         # Ensure entry_executed_price is set (use entry_price as fallback)
         if full_trade_record.get('entry_executed_price') is None:
             full_trade_record['entry_executed_price'] = full_trade_record.get('entry_price')
+        
+        # Calculate slippage
+        # Entry slippage: difference between order price and executed price
+        entry_price = full_trade_record.get('entry_price')
+        entry_executed_price = full_trade_record.get('entry_executed_price')
+        if entry_price is not None and entry_executed_price is not None:
+            entry_slippage = abs(entry_executed_price - entry_price)
+            full_trade_record['entry_slippage'] = entry_slippage
+        
+        # Close slippage: difference between TP/SL order price and executed exit price
+        # Get TP/SL price from trade_record (stored when order was placed)
+        exit_order_price = None
+        if trade_state == TradeState.TP_HIT:
+            exit_order_price = trade_record.get('tp')
+        elif trade_state == TradeState.SL_HIT:
+            exit_order_price = trade_record.get('sl')
+        
+        # Fallback to order.price if not found in trade_record
+        if exit_order_price is None and hasattr(order, 'price') and order.price:
+            exit_order_price = order.price
+        
+        if exit_order_price is not None and exit_price is not None:
+            close_slippage = abs(exit_price - exit_order_price)
+            full_trade_record['close_slippage'] = close_slippage
+        
+        # Total slippage cost (in price units, will be multiplied by size later for dollar cost)
+        entry_slippage_val = full_trade_record.get('entry_slippage', 0) or 0
+        close_slippage_val = full_trade_record.get('close_slippage', 0) or 0
+        total_slippage_price = entry_slippage_val + close_slippage_val
+        # Total slippage cost in dollars (slippage per unit * position size)
+        total_slippage_cost = total_slippage_price * size
+        full_trade_record['total_slippage'] = total_slippage_cost
         
         # IMPORTANT: Update the trade in self.trades dict (not just the copy)
         if trade_id and trade_id in self.trades:

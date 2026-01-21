@@ -325,7 +325,7 @@ Common sources:
 4. Perfect execution at exact prices
 
 Manual checks needed:
-- Review indicator calculations (SupportResistances.py, BreakRetestIndicator.py)
+- Review indicator calculations (Zones.py, BreakRetestIndicator.py)
 - Verify indicators only use past candles (index -1, -2, etc.)
 - Check if S/R levels are calculated before trades are placed
 - Verify execution uses realistic prices (not perfect fills)
