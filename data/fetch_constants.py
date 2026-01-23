@@ -45,7 +45,10 @@ DEFAULT_TIMEFRAME = "H1"
 # ============================================================================
 def generate_csv_filename(symbol: str, timeframe: str, start_date: datetime, end_date: datetime):
     """Generate CSV filename from symbol, timeframe, and date range."""
-    return f"{symbol}_{timeframe}_{start_date.date()}_{end_date.date()}.csv"
+    # Format datetime as YYYY-MM-DD_HH-MM for filesystem safety
+    start_str = start_date.strftime("%Y-%m-%d_%H:%M")
+    end_str = end_date.strftime("%Y-%m-%d_%H:%M")
+    return f"{symbol}_{timeframe}_{start_str}_{end_str}.csv"
 
 
 def parse_datetime(value):

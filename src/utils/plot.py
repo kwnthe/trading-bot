@@ -362,7 +362,7 @@ def add_price(fig, df, has_rsi):
         close=df["close"],
         increasing=dict(line=dict(color="#089981"), fillcolor="#089981"),
         decreasing=dict(line=dict(color="#F23645"), fillcolor="#F23645"),
-        hoverinfo="skip",  # Always skip hover for candlestick chart
+        hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
     )
 
     fig.add_trace(trace, row=1 if has_rsi else None, col=1 if has_rsi else None)
@@ -381,6 +381,7 @@ def add_rsi(fig, df, rsi, daily_rsi=None):
             line=dict(color="#2962FF", width=2),
             name="RSI",
             showlegend=True,
+            hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
         ),
         row=2,
         col=1,
@@ -396,6 +397,7 @@ def add_rsi(fig, df, rsi, daily_rsi=None):
                 line=dict(color="#FF9800", width=2, dash="dash"),
                 name="Daily RSI",
                 showlegend=True,
+                hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
             ),
             row=2,
             col=1,
@@ -417,7 +419,7 @@ def add_ema(fig, df, ema, has_rsi):
             mode="lines",
             line=dict(color="#FF9800", width=2),
             name="EMA",
-            hoverinfo="skip" if not SHOW_HOVER_LABELS else "x+y",
+            hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
             showlegend=False,
         ),
         row=1 if has_rsi else None,
@@ -429,21 +431,22 @@ def apply_tradingview_style(fig, has_rsi: bool):
     current_showlegend = getattr(fig.layout, 'showlegend', False)
     current_legend = getattr(fig.layout, 'legend', None)
     
+    # Enable hovermode to show spikes (crosshair lines), but hide labels with empty hovertemplates
     fig.update_layout(
         paper_bgcolor="white",
         plot_bgcolor="white",
         font=dict(color="#2A2E39", size=12),
         showlegend=current_showlegend,  # Preserve legend visibility
         legend=current_legend,  # Preserve legend settings
-        hovermode="x" if SHOW_HOVER_LABELS else False,
+        hovermode="x",  # Enable hover to show spikes, but we'll hide labels with empty hovertemplates
     )
 
     fig.update_xaxes(
         showgrid=True,
         gridcolor="#E6E8EB",
         zeroline=False,
-        showspikes=SHOW_HOVER_LABELS,  # Only show spikes when labels are enabled
-        spikemode="across",
+        showspikes=True,  # Always show crosshair lines (spikes)
+        spikemode="across",  # Only show lines across, no arrows on axes
         spikesnap="cursor",
         spikecolor="#B2B5BE",
         spikethickness=1,
@@ -459,8 +462,8 @@ def apply_tradingview_style(fig, has_rsi: bool):
         showgrid=True,
         gridcolor="#E6E8EB",
         zeroline=False,
-        showspikes=SHOW_HOVER_LABELS,  # Only show spikes when labels are enabled
-        spikemode="across",
+        showspikes=True,  # Always show crosshair lines (spikes)
+        spikemode="across",  # Only show lines across, no arrows on axes
         spikesnap="cursor",
         spikecolor="#B2B5BE",
         spikethickness=1,
@@ -483,6 +486,21 @@ def apply_tradingview_style(fig, has_rsi: bool):
             tickmode="array",
             tickvals=steps,
             ticktext=steps,
+            showspikes=True,  # Show crosshair lines in RSI subplot too
+            spikemode="across",
+            spikesnap="cursor",
+            spikecolor="#B2B5BE",
+            spikethickness=1,
+        )
+        # Also enable spikes for x-axis of RSI subplot
+        fig.update_xaxes(
+            row=2,
+            col=1,
+            showspikes=True,  # Show crosshair lines in RSI subplot too
+            spikemode="across",
+            spikesnap="cursor",
+            spikecolor="#B2B5BE",
+            spikethickness=1,
         )
 
 
@@ -506,7 +524,7 @@ def add_support_resistance(fig, df, breakout_ind, has_rsi):
                 y=y, 
                 mode="lines", 
                 line=dict(color=color, width=2),
-                hoverinfo="skip" if not SHOW_HOVER_LABELS else "x+y",
+                hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
                 showlegend=False,
             ),
             row=1 if has_rsi else None,
@@ -611,7 +629,7 @@ def add_order_placements(fig, df, cerebro, symbol_index, has_rsi):
                 mode="markers",
                 marker=dict(symbol=symbol, size=size, color=color),
                 name="Placed Order" if symbol == 'diamond' and color == 'black' else f"Marker ({symbol})",
-                hoverinfo="skip" if not SHOW_HOVER_LABELS else "x+y+name",
+                hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
                 showlegend=False,
             ),
             row=1 if has_rsi else None,
@@ -731,14 +749,13 @@ def add_orders(fig, orders: Iterable[dict], has_rsi: bool = False):
                 line=dict(color="#787B86", width=1, dash="dot"),
                 name="Entry",
                 showlegend=False,
-                hoverinfo="skip",
+                hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
             ),
             row=1 if has_rsi else None,
             col=1 if has_rsi else None,
         )
         
         # Add entry marker
-        entry_hovertemplate = f"Entry: {entry_price:.5f}<extra></extra>" if SHOW_HOVER_LABELS else None
         fig.add_trace(
             go.Scatter(
                 x=[open_dt],
@@ -752,8 +769,7 @@ def add_orders(fig, orders: Iterable[dict], has_rsi: bool = False):
                 ),
                 name="Entry",
                 showlegend=False,
-                hoverinfo="skip" if not SHOW_HOVER_LABELS else None,
-                hovertemplate=entry_hovertemplate,
+                hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
             ),
             row=1 if has_rsi else None,
             col=1 if has_rsi else None,
@@ -764,7 +780,6 @@ def add_orders(fig, orders: Iterable[dict], has_rsi: bool = False):
             exit_price = o.get("exit_price")
             if exit_price:
                 exit_color = "#089981" if close_reason == "TP" else "#F23645"
-                exit_hovertemplate = f"Exit: {exit_price:.5f} ({close_reason})<extra></extra>" if SHOW_HOVER_LABELS else None
                 fig.add_trace(
                     go.Scatter(
                         x=[close_dt],
@@ -778,8 +793,7 @@ def add_orders(fig, orders: Iterable[dict], has_rsi: bool = False):
                         ),
                         name="Exit",
                         showlegend=False,
-                        hoverinfo="skip" if not SHOW_HOVER_LABELS else None,
-                        hovertemplate=exit_hovertemplate,
+                        hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
                     ),
                     row=1 if has_rsi else None,
                     col=1 if has_rsi else None,
@@ -876,6 +890,7 @@ def plotly_plot(
         # The modifier keys work automatically with Plotly's built-in behavior
     )
     
+    # Display the figure
     fig.show(config=config)
 
 
@@ -955,7 +970,7 @@ def add_candle_index_arrows(fig, df, step=10, has_rsi=True):
             textposition="top center",
             name="Candle Index",
             showlegend=False,
-            hoverinfo="text",
+            hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
             opacity=0.2,
         ),
         row=1 if has_rsi else None,

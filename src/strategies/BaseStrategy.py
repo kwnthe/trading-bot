@@ -587,21 +587,24 @@ class BaseStrategy(bt.Strategy):
                 if timeframe and start_date and end_date:
                     # Import generate_csv_filename
                     from src.utils.backtesting import generate_csv_filename
-                    filename = generate_csv_filename(symbol, timeframe, start_date, end_date)
-                    # Modify path to use data/backtests directory
-                    filename = Path(filename)
-                    filename = filename.name  # Get just the filename
+                    filepath = generate_csv_filename(symbol, timeframe, start_date, end_date, type_="results")
+                    # Ensure directory exists
+                    filepath.parent.mkdir(parents=True, exist_ok=True)
+                    filepath = str(filepath)  # Convert Path to string for compatibility
                 else:
+                    # Fallback: use manual path construction
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    backtests_dir = os.path.join(project_root, 'data', 'backtests','results')
+                    os.makedirs(backtests_dir, exist_ok=True)
                     filename = f"rr_{self.params.rr}.csv"
+                    filepath = os.path.join(backtests_dir, filename)
             else:
+                # Fallback: use manual path construction
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                backtests_dir = os.path.join(project_root, 'data', 'backtests','results')
+                os.makedirs(backtests_dir, exist_ok=True)
                 filename = f"rr_{self.params.rr}.csv"
-        
-        # Ensure we're in the project root directory
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        # Create data/backtests directory if it doesn't exist
-        backtests_dir = os.path.join(project_root, 'data', 'backtests')
-        os.makedirs(backtests_dir, exist_ok=True)
-        filepath = os.path.join(backtests_dir, filename)
+                filepath = os.path.join(backtests_dir, filename)
         
         try:
             # Define CSV columns - only fields that are already tracked

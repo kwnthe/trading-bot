@@ -4,6 +4,7 @@ import sys
 import os
 from pathlib import Path
 import pandas as pd
+from typing import Literal
 from src.utils.config import Config
 
 # Ensure root directory is in path for data.fetch import
@@ -45,6 +46,7 @@ def prepare_backtesting(symbols: list[str], timeframe: Timeframe, start_date: da
     for symbol in symbols:
         file_path = generate_csv_filename(symbol, timeframe, start_date, end_date)
         
+        print(f"file_path: {file_path}")
         # Check if file exists AND has valid OHLC format
         if os.path.exists(file_path) and _is_valid_ohlc_csv(file_path):
             print(f"Using cached candlestick data for {symbol}")
@@ -106,7 +108,7 @@ def prepare_backtesting(symbols: list[str], timeframe: Timeframe, start_date: da
         })
     return symbols_list
 
-def generate_csv_filename(symbol: str, timeframe: Timeframe, start_date: datetime, end_date: datetime):
+def generate_csv_filename(symbol: str, timeframe: Timeframe, start_date: datetime, end_date: datetime, type_: Literal["data", "results"] = "data"):
     """Generate CSV filename using fetch_constants function, with path and symbol formatting."""
     # Format symbol (add . if not present)
     symbol_formatted = symbol if symbol.endswith('.') else f"{symbol}."
@@ -116,4 +118,4 @@ def generate_csv_filename(symbol: str, timeframe: Timeframe, start_date: datetim
     filename = _generate_csv_filename_base(symbol_formatted, timeframe_str, start_date, end_date)
     # Add the full path
     cwd = Path.cwd()
-    return cwd / "data/backtests" / filename
+    return cwd / "data/backtests" / type_ / filename

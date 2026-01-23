@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 import sys
 from pathlib import Path
 
+# Import generate_csv_filename from backtesting.py
+from src.utils.backtesting import generate_csv_filename as generate_csv_filename_backtest
+from src.models.timeframe import Timeframe
+
 # Import non-MT5 constants and utilities
 # Try relative import first (when used as module), then absolute (when run as script)
 try:
@@ -84,7 +88,7 @@ def find_correct_symbol(symbol: str):
 # ============================================================================
 # FETCH CANDLES
 # ============================================================================
-def fetch_candles(mode, start, end, symbol, timeframe):
+def fetch_candles(mode, start, end, symbol, timeframe, type_: str = "data"):
     if not mt5.initialize():
         raise RuntimeError("MT5 initialization failed")
 
@@ -141,10 +145,13 @@ def fetch_candles(mode, start, end, symbol, timeframe):
 
     if mode == "csv":
         tf = get_timeframe_string(timeframe)
-        # Save to data/backtests/ directory to match backtesting.py expectations
-        output_dir = SCRIPT_DIR / "backtests"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / generate_csv_filename(symbol, tf, start, end)
+        # Use generate_csv_filename from backtesting.py which handles path and symbol formatting
+        timeframe_enum = Timeframe.from_value(tf)
+        if timeframe_enum is None:
+            raise ValueError(f"Invalid timeframe: {tf}")
+        output_path = generate_csv_filename_backtest(symbol, timeframe_enum, start, end, type_="data")
+        # Ensure directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(output_path, index=False)
         return {
             "success": True,
