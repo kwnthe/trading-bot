@@ -508,7 +508,7 @@ def apply_tradingview_style(fig, has_rsi: bool):
 # Indicators / overlays
 # ============================================================
 
-def add_support_resistance(fig, df, breakout_ind, has_rsi):
+def add_zone(fig, df, breakout_ind, has_rsi):
     if breakout_ind is None:
         return
 
@@ -523,7 +523,7 @@ def add_support_resistance(fig, df, breakout_ind, has_rsi):
                 x=x, 
                 y=y, 
                 mode="lines", 
-                line=dict(color=color, width=2),
+                line=dict(color=color, width=4),
                 hovertemplate="<extra></extra>",  # Empty template to allow hover events but show no labels
                 showlegend=False,
             ),
@@ -840,7 +840,7 @@ def plotly_plot(
         indicators = cerebro.data_indicators[symbol_index]
         breakout = indicators.get("breakout") if indicators else None
 
-        add_support_resistance(fig, df, breakout, has_rsi)
+        add_zone(fig, df, breakout, has_rsi)
         add_order_placements(fig, df, cerebro, symbol_index, has_rsi)
 
     # Auto-extract orders from strategy if not provided
