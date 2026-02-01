@@ -4,7 +4,7 @@ from indicators import Zones
 from src.models.trend import Trend
 from src.utils.config import Config
 from src.models.candlestick import CandleType, Candlestick
-from src.utils.strategy_utils.general_utils import convert_micropips_to_price, convert_pips_to_price, get_total_movement_from_continuous_candles, is_minor_pair
+from src.utils.strategy_utils.general_utils import is_minor_pair, convert_atr_to_price
 from src.models.s_r import SR, SRLevelType
 from src.utils.environment_variables import EnvironmentVariables
 
@@ -27,7 +27,6 @@ class BreakoutIndicator(Zones):
         self.symbol = symbol
         self.candle_index = -1
         self.is_minor = is_minor_pair(symbol)
-        self.min_breakout_micropips = EnvironmentVariables.access_config_value(EnvironmentVariables.BREAKOUT_MIN_STRENGTH_MICROPIPS, symbol)
         
         # Breakout/Retest related
         self.last_breakout_trend = None
@@ -80,7 +79,9 @@ class BreakoutIndicator(Zones):
     def is_breakout(self):
         try:
             previous_candle = Candlestick.from_bt(self.data, -1)
-            min_breakout_price = convert_micropips_to_price(self.min_breakout_micropips, self.symbol)
+            # Get current ATR value (inherited from Zones parent class)
+            current_atr = self.atr[0] if len(self.atr) > 0 else 0.0
+            min_breakout_price = convert_atr_to_price(current_atr, EnvironmentVariables.BREAKOUT_MIN_STRENGTH_ATR, self.symbol)
             
             if previous_candle.close <= self.resistance + min_breakout_price and \
                 self.current_candle.close >= self.resistance + min_breakout_price:

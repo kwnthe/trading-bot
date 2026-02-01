@@ -2,9 +2,8 @@ import backtrader as bt
 from src.models.trend import Trend
 from src.utils.config import Config
 from src.models.candlestick import CandleType, Candlestick
-from src.utils.strategy_utils.general_utils import convert_micropips_to_price, get_total_movement_from_continuous_candles, is_minor_pair
+from src.utils.strategy_utils.general_utils import get_total_movement_from_continuous_candles, is_minor_pair, is_movement_significant
 import math
-from src.utils.environment_variables import EnvironmentVariables
 
 sr_config = dict(color='#E91E63', linewidth=5, linestyle='-', alpha=0.8, zorder=10)
 support_config = sr_config.copy()
@@ -32,6 +31,8 @@ class Zones(bt.Indicator):
         self.lookback_period = Config.breakout_lookback_period
         self.is_minor = is_minor_pair(symbol)
         self.extend_srs = True
+        # Calculate ATR for movement significance checks
+        self.atr = bt.indicators.ATR(self.data, period=Config.atr_length)
         # self.addminperiod(self.lookback_period)
         
     def next(self):
@@ -45,8 +46,14 @@ class Zones(bt.Indicator):
 
         try:
             current_candle = Candlestick.from_bt(self.data, 0)
+            
+            # Get current ATR value (use [0] to get the current bar's value)
+            current_atr = self.atr[0] if len(self.atr) > 0 else 0.0
+            # Fallback to a small value if ATR is not yet calculated or is invalid
+            if current_atr is None or current_atr <= 0 or (isinstance(current_atr, float) and (current_atr != current_atr)):  # Check for NaN
+                current_atr = 0.0001  # Small fallback value
 
-            continuous_movement_data = get_total_movement_from_continuous_candles(self.data, 0, self.candle_index, self.symbol, skip_small_movements=True)
+            continuous_movement_data = get_total_movement_from_continuous_candles(self.data, 0, self.candle_index, self.symbol, current_atr, skip_small_movements=True)
             continuous_movement_high = continuous_movement_data["max_price"]
             continuous_movement_low = continuous_movement_data["min_price"]
             last_opposite_candle_index = continuous_movement_data["current_index"]
@@ -64,7 +71,7 @@ class Zones(bt.Indicator):
             # Handle cases where we don't have enough data
             return
 
-        if (continuous_movement_high - continuous_movement_low) >= convert_micropips_to_price(EnvironmentVariables.access_config_value(EnvironmentVariables.ZONE_INVERSION_MARGIN_MICROPIPS, self.symbol), self.symbol): # Movement big enough
+        if is_movement_significant(continuous_movement_high, continuous_movement_low, current_atr, self.symbol):  # Movement big enough
             # Fill the S/R lines
             # for i in range(0, last_opposite_candle_index - 1, - 1):
             for i in range(0, -1, - 1): # run one time

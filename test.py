@@ -9,7 +9,7 @@ original_stderr = sys.stderr
 dotenv_path = os.path.abspath(os.path.join("..", ".env"))
 load_dotenv(dotenv_path)
 
-os.environ['ZONE_INVERSION_MARGIN_MICROPIPS'] = '400'  # Zones Tuning
+os.environ['ZONE_INVERSION_MARGIN_MICROPIPS'] = '200'  # Zones Tuning
 os.environ['BREAKOUT_MIN_STRENGTH_MICROPIPS'] = '100'  # Breakout Tuning
 os.environ['MIN_RISK_DISTANCE_MICROPIPS'] = '0.001'
 os.environ['RR'] = '2'
@@ -34,10 +34,14 @@ from main import backtesting
 
 max_candles = None
 #symbols = ['XAGUSD', 'XAUUSD', 'EURUSD']
-symbols = ['XAGUSD']
+symbols = ['XAUUSD']
 timeframe = Timeframe.H1
-start_date = datetime(2025, 11, 26, 13, 10, 0)
-end_date = datetime.now()
+start_date = datetime(2011, 11, 26, 13, 10, 0)
+# start_date = datetime(2015, 11, 26, 13, 10, 0)
+# 2026-01-22_15:23
+# end_date = datetime(2026, 1, 22, 15, 23, 0)
+end_date = datetime(2016, 12, 22, 15, 23, 0)
+# end_date = datetime.now()
 
 
 

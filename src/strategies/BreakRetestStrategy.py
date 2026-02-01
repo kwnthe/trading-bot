@@ -1,7 +1,7 @@
 from src.models.trend import Trend
 from src.strategies.BaseStrategy import BaseStrategy
 from src.models.order import OrderType, TradeState, OrderSide, log_trade
-from src.utils.strategy_utils.general_utils import convert_micropips_to_price
+from src.utils.strategy_utils.general_utils import convert_atr_to_price
 from utils.logging import format_price
 from utils.config import Config
 from infrastructure import LogLevel, RepositoryName
@@ -133,7 +133,8 @@ class BreakRetestStrategy(BaseStrategy):
         
         # Avoid trades with too small risk  
         risk_distance = abs(resistance - support)  
-        min_risk_distance_price = convert_micropips_to_price(EnvironmentVariables.access_config_value(EnvironmentVariables.MIN_RISK_DISTANCE_MICROPIPS, symbol), symbol)  
+        atr_value = data_indicators[data_index]['atr'][0] if len(data_indicators[data_index]['atr']) > 0 else 0.0
+        min_risk_distance_price = convert_atr_to_price(atr_value, EnvironmentVariables.MIN_RISK_DISTANCE_ATR, symbol)
         if risk_distance < min_risk_distance_price:  
             return
         order_datetime = data.datetime.datetime(0)
@@ -156,12 +157,14 @@ class BreakRetestStrategy(BaseStrategy):
         if breakout_trend == Trend.UPTREND:  
             side = OrderSide.BUY  
             entry_price = resistance  
-            sl = support - convert_micropips_to_price(EnvironmentVariables.access_config_value(EnvironmentVariables.SL_BUFFER_MICROPIPS, symbol), symbol)  
+            sl_buffer = convert_atr_to_price(atr_value, EnvironmentVariables.SL_BUFFER_ATR, symbol)
+            sl = support - sl_buffer  
             tp = entry_price + risk_distance * self.params.rr  
         else:  
             side = OrderSide.SELL  
             entry_price = support  
-            sl = resistance + convert_micropips_to_price(EnvironmentVariables.access_config_value(EnvironmentVariables.SL_BUFFER_MICROPIPS, symbol), symbol)  
+            sl_buffer = convert_atr_to_price(atr_value, EnvironmentVariables.SL_BUFFER_ATR, symbol)
+            sl = resistance + sl_buffer  
             tp = entry_price - risk_distance * self.params.rr  
 
         size, risk_amount = self.calculate_position_size(risk_distance)  
@@ -312,7 +315,8 @@ class BreakRetestStrategy(BaseStrategy):
             if trade.get('data_index') != data_index:
                 continue
             if trade.get('state') == TradeState.PENDING:  
-                invalidation_price = convert_micropips_to_price(EnvironmentVariables.access_config_value(EnvironmentVariables.SR_CANCELLATION_THRESHOLD_MICROPIPS, symbol), symbol)  
+                atr_value = data_indicators[data_index]['atr'][0] if len(data_indicators[data_index]['atr']) > 0 else 0.0
+                invalidation_price = convert_atr_to_price(atr_value, EnvironmentVariables.SR_CANCELLATION_THRESHOLD_ATR, symbol)
                 trade_id = trade.get('trade_id')
                 if trade['order_side'] == OrderSide.BUY and support is not None and trade.get('broken_resistance') is not None:  
                     if support > trade['broken_resistance'] + invalidation_price:  
