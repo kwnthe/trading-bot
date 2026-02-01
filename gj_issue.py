@@ -12,11 +12,6 @@ load_dotenv(dotenv_path)
 os.environ['ZONE_INVERSION_MARGIN_ATR'] = '1'  # Zones Tuning
 os.environ['BREAKOUT_MIN_STRENGTH_ATR'] = '0.2'  # Breakout Tuning
 os.environ['MIN_RISK_DISTANCE_ATR'] = '0.5'
-os.environ['RR'] = '2'
-os.environ['CHECK_FOR_DAILY_RSI'] = 'False'
-os.environ['EMA_LENGTH'] = '40'
-os.environ['SR_CANCELLATION_THRESHOLD_ATR'] = '0.2'
-os.environ['SL_BUFFER_ATR'] = '0.3'
 
 notebook_dir = os.getcwd()
 if os.path.basename(notebook_dir) == "notebooks":
@@ -28,18 +23,14 @@ from src.models.timeframe import Timeframe
 from src.utils.plot import plotly_plot
 from main import backtesting
 
-max_candles = None
-#symbols = ['XAGUSD', 'XAUUSD', 'EURUSD']
-symbols = ['XAUUSD']
-timeframe = Timeframe.H1
-# start_date = datetime(2011, 11, 26, 13, 10, 0)
-start_date = datetime(2025, 11, 26, 13, 10, 0)
-# 2026-01-22_15:23
-# end_date = datetime(2026, 1, 22, 15, 23, 0)
-end_date = datetime(2026, 12, 22, 15, 23, 0)
-# end_date = datetime.now()
+Config.show_debug_logs = True
 
 
+max_candles = 1600
+symbols = ['GBPJPY']
+timeframe = Timeframe.M15
+start_date = datetime(2025, 12, 1, 13, 10, 0)
+end_date = datetime(2025, 12, 26, 13, 10, 0)
 
 res = backtesting(
         symbols=symbols,
@@ -49,4 +40,4 @@ res = backtesting(
         max_candles=max_candles)
 
 for symbol_index, (symbol, pair_data) in enumerate(res['data'].items()):
-    plotly_plot(res['cerebro'], pair_data, symbol, symbol_index=symbol_index, height=1400)
+    plotly_plot(res['cerebro'], pair_data, symbol, symbol_index=symbol_index, height=1200)

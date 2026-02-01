@@ -4,7 +4,7 @@ from .BreakoutIndicator import BreakoutIndicator
 from src.models.trend import Trend
 from src.utils.config import Config
 from src.models.candlestick import CandleType, Candlestick
-from src.utils.strategy_utils.general_utils import convert_micropips_to_price, get_total_movement_from_continuous_candles, is_minor_pair
+from src.utils.strategy_utils.general_utils import is_minor_pair
 
 class BreakRetestIndicator(Zones):
     lines = ('breakout', 'retest')

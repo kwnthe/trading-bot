@@ -17,10 +17,8 @@ class Configuration(BaseSettings):
     mode: Literal["backtest", "live"]
     market_type: Literal["forex", "crypto", "stocks"]
     breakout_lookback_period: int = Field(..., ge=1, le=1000000) # Candlestick count
-    breakout_micropips_threshold: float = Field(..., ge=0.1, le=10000000000.0)  # Pips needed for breakout
-    sideways_trigger_candle_height_micropips: float = Field(..., ge=0.1, le=100.0)  # Candle height to trigger sideways
-    zone_inversion_margin_micropips: float = Field(..., ge=0, le=10000000000.0)
-    breakout_min_strength_micropips: float = Field(..., ge=0.001, le=10000000000.0)
+    zone_inversion_margin_atr: float = Field(..., ge=0, le=10000000000.0)
+    breakout_min_strength_atr: float = Field(..., ge=0.001, le=10000000000.0)
     # Take Profit and Stop Loss settings
     take_profit_pips: float = Field(default=20.0, ge=1.0, le=1000.0)  # Take profit in pips
     stop_loss_pips: float = Field(default=10.0, ge=1.0, le=1000.0)   # Stop loss in pips
@@ -30,9 +28,9 @@ class Configuration(BaseSettings):
     rr: float = Field(..., ge=0, le=10000) 
     initial_equity: float = Field(..., ge=0, le=10000000000.0)
     risk_per_trade: float = Field(default=0.01, ge=0.0000001, le=1.0)
-    sr_cancellation_threshold_micropips: float = Field(default=5.0, ge=0.0001, le=1000.0)  # Threshold in pips for cancelling orders when S/R levels change
-    sl_buffer_micropips: float = Field(default=2.0, ge=0.0, le=100.0)  # Buffer in pips to add below support (BUY) or above resistance (SELL) for stop loss placement
-    min_risk_distance_micropips: float = Field(default=10.0, ge=0.0, le=100.0)  # Minimum risk distance in pips for placing a trade
+    sr_cancellation_threshold_atr: float = Field(default=5.0, ge=0.0001, le=1000.0)  # Threshold in pips for cancelling orders when S/R levels change
+    sl_buffer_atr: float = Field(default=2.0, ge=0.0, le=100.0)  # Buffer in pips to add below support (BUY) or above resistance (SELL) for stop loss placement
+    min_risk_distance_atr: float = Field(default=10.0, ge=0.0, le=100.0)  # Minimum risk distance in pips for placing a trade
     pair_specific_config: dict = Field(default={})  # Pair specific configuration
     check_for_daily_rsi: bool = Field(default=True)
     

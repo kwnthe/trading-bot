@@ -448,7 +448,7 @@ Example:
     --method grid_search \\
     --linear-step 100 \\
     --top-n 10 \\
-    --params '{"XAUUSD": {"ZONE_INVERSION_MARGIN_MICROPIPS": {"start": 0, "end": 2000, "step": 100}}}'
+    --params '{"XAUUSD": {"ZONE_INVERSION_MARGIN_ATR": {"start": 0, "end": 2000, "step": 100}}}'
         """
     )
     
