@@ -64,7 +64,7 @@ class BaseStrategy(bt.Strategy):
             'ema': bt.indicators.EMA(
                 self.data.close,
                 period=Config.ema_length
-            )
+            ),
         }
         
         # Store reference to daily data for potential future use
@@ -124,6 +124,10 @@ class BaseStrategy(bt.Strategy):
                     cerebro.data_indicators[original_data_index] = {
                         'breakout': BreakoutIndicator(data, symbol=symbol),
                         'break_retest': BreakRetestIndicator(data, symbol=symbol),
+                        'atr': bt.indicators.ATR(data, period=Config.atr_length),
+                        'ema': bt.indicators.EMA(data.close, period=Config.ema_length),
+                        'volume_ma': bt.indicators.SMA(data.volume, period=Config.volume_ma_length),
+                        'rsi': bt.indicators.RSI(data.close, period=14),
                         'symbol': symbol,
                         'data': data
                     }
@@ -147,6 +151,7 @@ class BaseStrategy(bt.Strategy):
             if 0 in cerebro.data_indicators:
                 self.breakout_indicator = cerebro.data_indicators[0]['breakout']
                 self.break_retest_indicator = cerebro.data_indicators[0]['break_retest']
+                self.indicators['volume_ma'] = cerebro.data_indicators[0]['volume_ma']
                 self.indicators['support_resistances'] = {
                     'breakout': self.breakout_indicator,
                     'break_retest': self.break_retest_indicator
@@ -156,6 +161,8 @@ class BaseStrategy(bt.Strategy):
         # This allows existing code like strategy.ema or strategy.rsi to continue working
         self.rsi = self.indicators.get('rsi')
         self.ema = self.indicators.get('ema')
+        self.atr = self.indicators.get('atr')
+        self.volume_ma = self.indicators.get('volume_ma')
         self.daily_rsi = self.indicators.get('daily_rsi')
         
         self.just_broke_out = None
@@ -607,7 +614,6 @@ class BaseStrategy(bt.Strategy):
                 filepath = os.path.join(backtests_dir, filename)
         
         try:
-            # Define CSV columns - only fields that are already tracked
             fieldnames = [
                 'trade_id', 'symbol', 'order_side', 'state',
                 'placed_candle', 'placed_datetime',
@@ -615,7 +621,11 @@ class BaseStrategy(bt.Strategy):
                 'size', 'tp', 'sl',
                 'open_candle', 'open_datetime',
                 'close_candle', 'close_datetime',
-                'exit_price', 'pnl', 'close_reason'
+                'exit_price', 'pnl', 
+                # AI training
+                'rsi_at_break', 'time_to_fill', 'relative_volume',
+                'highest_excursion_from_breakout', 'atr_rel_excursion',
+                'atr_breakout_wick', 'atr_sl_dist', 'atr_tp_dist',
             ]
             
             with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
@@ -697,6 +707,8 @@ class BaseStrategy(bt.Strategy):
                 final_equity = self.broker.getvalue()
                 pnl_percentage = ((final_equity - self.initial_cash) / self.initial_cash * 100) if self.initial_cash > 0 else 0.0
                 
+                csvfile.write(f"\n")
+                csvfile.write("-------- TRADE LOG --------\n")
                 csvfile.write(f"# RR: {self.params.rr}\n")
                 csvfile.write(f"# Win Ratio: {win_ratio:.2%}\n")
                 csvfile.write(f"# TPs: {total_tps}\n")

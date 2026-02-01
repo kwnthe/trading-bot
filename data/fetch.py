@@ -5,8 +5,6 @@ from datetime import datetime, timedelta
 import sys
 from pathlib import Path
 
-# Import generate_csv_filename from backtesting.py
-from src.utils.backtesting import generate_csv_filename as generate_csv_filename_backtest
 from src.models.timeframe import Timeframe
 
 # Import non-MT5 constants and utilities
@@ -144,6 +142,8 @@ def fetch_candles(mode, start, end, symbol, timeframe, type_: str = "data"):
     df["time"] = pd.to_datetime(df["time"], unit="s")
 
     if mode == "csv":
+        # Lazy import to avoid circular dependency
+        from src.utils.backtesting import generate_csv_filename as generate_csv_filename_backtest
         tf = get_timeframe_string(timeframe)
         # Use generate_csv_filename from backtesting.py which handles path and symbol formatting
         timeframe_enum = Timeframe.from_value(tf)

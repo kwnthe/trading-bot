@@ -29,7 +29,7 @@ class Configuration(BaseSettings):
 
     rr: float = Field(..., ge=0, le=10000) 
     initial_equity: float = Field(..., ge=0, le=10000000000.0)
-    risk_per_trade: float = Field(default=0.01, ge=0.001, le=1.0)
+    risk_per_trade: float = Field(default=0.01, ge=0.0000001, le=1.0)
     sr_cancellation_threshold_micropips: float = Field(default=5.0, ge=0.0001, le=1000.0)  # Threshold in pips for cancelling orders when S/R levels change
     sl_buffer_micropips: float = Field(default=2.0, ge=0.0, le=100.0)  # Buffer in pips to add below support (BUY) or above resistance (SELL) for stop loss placement
     min_risk_distance_micropips: float = Field(default=10.0, ge=0.0, le=100.0)  # Minimum risk distance in pips for placing a trade
@@ -50,6 +50,8 @@ class Configuration(BaseSettings):
 
     # Indicators
     ema_length: int = Field(default=9)
+    atr_length: int = Field(default=14)
+    volume_ma_length: int = Field(default=20)
 
     # Mac remote fetching of csv data
     backtest_fetch_csv_url: Optional[str] = Field(default=None)  # URL of the fetch server

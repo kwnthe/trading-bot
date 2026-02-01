@@ -28,36 +28,12 @@ class BreakRetestStrategy(BaseStrategy):
     # ----------------------- NEXT -----------------------  
     def next(self):  
         current_bar_time = self.data.datetime.datetime(0)
-        if self.candle_index >= 464 and self.candle_index <= 472:
-            data_state = self._get_data_state()
-            support = data_state[0]['support']
-            resistance = data_state[0]['resistance']
-            print(f"current price: {self.data.close[0]}, current bar num: {self.candle_index}, current bar time: {current_bar_time}, resistance: {resistance}, support: {support}")
         is_backfilling_live_mode = not self._is_backtesting() and not getattr(self.data, 'live_mode', False)
         
         # Check if we've already processed this timestamp (prevent duplicate calls)
         # Use timestamp only since bar numbers can change between runs
         if self.last_processed_timestamp == current_bar_time:
             return
-            # WHY THIS HAPPENS:
-            # Backtrader can call next() multiple times for the same timestamp when:
-            # 1. Multiple data feeds + replaydata: Backtrader synchronizes all feeds and may call next()
-            #    multiple times during synchronization, especially with replaydata feeds
-            # 2. Internal synchronization: Backtrader's sync mechanism may trigger multiple calls
-            #    for the same timestamp when processing multiple symbols
-            # 3. This is NORMAL behavior - the duplicate check prevents double-processing
-            # print(f"SKIPPING DUPLICATE next() call - Bar #{current_bar_num} at {current_bar_time}")
-            # print(f"  Last processed: {self.last_processed_timestamp}")
-            # print(f"  Current: {current_bar_time}")
-            # print(f"  Number of data feeds: {len(self.datas)}")
-            # for i, data in enumerate(self.datas):
-            #     try:
-            #         feed_time = data.datetime.datetime(0)
-            #         feed_name = getattr(data, '_name', f'Feed_{i}')
-            #         print(f"    {feed_name}: {feed_time}")
-            #     except:
-            #         pass
-            # return
         
         # Mark this timestamp as processed
         self.last_processed_timestamp = current_bar_time
@@ -84,13 +60,15 @@ class BreakRetestStrategy(BaseStrategy):
             }
             self.log_to_repo(LogLevel.INFO, f"<b>[{data_indicators[i]['symbol']}={format_price(current_price)}]</b> ({'Backtesting' if self._is_backtesting() else 'Backfill' if is_backfilling_live_mode else 'Live'}): {log_dict}", RepositoryName.ZONES, date=current_bar_time)
             daily_rsi = self.indicators['daily_rsi'][0] if self.indicators['daily_rsi'] is not None else None
+            ema = data_indicators[i]['ema']
             order_confirmations = [
                 pair_state['just_broke_out'],
                 # We don't have a current pending limit order on the same symbol and the same zone
                 
-                self.indicators['ema'][0] <= current_price if pair_state['breakout_trend'] == Trend.UPTREND else \
-                    self.indicators['ema'][0] >= current_price,
+                ema[0] <= current_price if pair_state['breakout_trend'] == Trend.UPTREND else \
+                    ema[0] >= current_price,
                 RSIConfirmations.daily_rsi_allows_trade(daily_rsi, pair_state['breakout_trend']) if Config.check_for_daily_rsi else True,
+                current_bar_time.weekday() != 0,  # Don't take orders on Monday (0 = Monday)
             ]
             if not is_backfilling_live_mode and all(order_confirmations):
                 # Get the data feed for this symbol
@@ -98,6 +76,23 @@ class BreakRetestStrategy(BaseStrategy):
                 self.place_retest_order_for_data(i)
                 self.set_chart_marker(self.candle_index, current_price, data_feed_index=i, marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
             self.invalidate_pending_trades_if_sr_changed_or_completed(i)  
+            self.process_pending_trade_updates(i)
+
+    def process_pending_trade_updates(self, data_index):
+        # Update atr_rel_excursion on pending orders for this pair
+        data_indicators = self._get_data_indicators()
+        data = data_indicators[data_index]['data']
+        high_price = data.high[0]
+        low_price = data.low[0]
+        for trade_key, trade in list(self.active_trades.items()):  
+            if trade.get('data_index') != data_index:
+                continue
+            if trade.get('state') == TradeState.PENDING or trade.get('state') == TradeState.RUNNING or \
+                trade.get('open_candle') == self.candle_index:
+                if trade.get('order_side') == OrderSide.BUY:
+                    trade['highest_excursion_from_breakout'] = max(trade['highest_excursion_from_breakout'], abs(high_price - trade['entry_price']))
+                else:
+                    trade['highest_excursion_from_breakout'] = max(trade['highest_excursion_from_breakout'], abs(low_price - trade['entry_price']))
 
     def place_retest_order_for_data(self, data_index):  
         """Place retest order for a specific data feed."""
@@ -235,7 +230,7 @@ class BreakRetestStrategy(BaseStrategy):
             'symbol': symbol,
             'order_side': side,  
             'state': TradeState.PENDING,  
-            'placed_candle': self.candle_index,
+            'placed_candle': self.candle_index - 1,
             'placed_datetime': current_datetime,
             'entry_price': entry_price,  # Order price (may differ from executed price)
             'entry_executed_price': None,  # Will be set when order fills
@@ -257,8 +252,16 @@ class BreakRetestStrategy(BaseStrategy):
             'open_datetime': None,
             'close_candle': None,
             'close_datetime': None,
-            'pnl': None,  
-            'close_reason': None  # Will be set to 'TP' or 'SL' when trade closes
+            'pnl': None,
+            'close_reason': None,  # Will be set to 'TP' or 'SL' when trade closes
+            # Metadata
+            'rsi_at_break': data_indicators[data_index]['rsi'][0],
+            'relative_volume': data.volume[0] / data_indicators[data_index]['volume_ma'][0], 
+            'atr_breakout_wick': (((data.high[0] - max(data.open[0], data.close[0])) if breakout_trend == Trend.UPTREND else (min(data.open[0], data.close[0]) - data.low[0])) / max(data_indicators[data_index]['atr'][0], 1e-6)),
+            'time_to_fill': None,
+            'highest_excursion_from_breakout': data.high[0] - entry_price if breakout_trend == Trend.UPTREND else entry_price - data.low[0],
+            'atr_sl_dist': abs(sl - entry_price) / data_indicators[data_index]['atr'][0],
+            'atr_tp_dist': abs(tp - entry_price) / data_indicators[data_index]['atr'][0],
         }  
 
         self.trades[trade_id] = trade_record
@@ -445,6 +448,10 @@ class BreakRetestStrategy(BaseStrategy):
                     trade_record["order_side"],
                     f"{symbol_str}Main Order Filled | Entry={order.executed.price} | Size={order.executed.size}"
                 )
+                trade_record['time_to_fill'] = self.candle_index - trade_record['placed_candle'] + 1
+                # We have to convert highest_excursion_from_breakout to atr_rel_excursion
+                atr = data_indicators[data_index]['atr']
+                trade_record['atr_rel_excursion'] = trade_record['highest_excursion_from_breakout'] / atr[0]
                 return
 
             if ref == tp_ref:

@@ -21,6 +21,7 @@ from src.models.timeframe import Timeframe
 from src.utils.plot import plotly_plot
 from src.brokers.backtesting_broker import BacktestingBroker
 from src.utils.strategy_utils.general_utils import convert_pips_to_price, convert_micropips_to_price
+from src.brokers.ForexLeverage import ForexLeverage
 
 def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, end_date: datetime, max_candles: int = None, print_trades: bool = False, spread_pips: float = 0.0):
     """
@@ -41,10 +42,9 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
     config = load_config()
     cerebro = bt.Cerebro(stdstats=False)
     
-    # Initialize persistent state in cerebro (survives strategy re-instantiation)
     cerebro.data_indicators = {}
     cerebro.data_state = {}
-    cerebro.broker = BacktestingBroker(spread_pips=spread_pips)
+    cerebro.broker.addcommissioninfo(ForexLeverage())
     
     data_feeds = []
     data_for_plotly = {}
@@ -106,10 +106,7 @@ def backtesting(symbols: list[str], timeframe: Timeframe, start_date: datetime, 
     cerebro.addstrategy(BreakRetestStrategy, symbol=symbol, rr=Config.rr)
     cerebro.addindicator(TestIndicator)
     
-    
-    
-    cerebro.broker.setcommission(commission=0.00008)
-    cerebro.broker.set_checksubmit(False)  # Disable order size checks
+    cerebro.broker.set_checksubmit(False)
     cerebro.broker.set_cash(Config.initial_equity)
     
     initial_cash = cerebro.broker.getcash()
@@ -449,7 +446,6 @@ def live_trading():
     
     # Set MT5 broker (supports multiple symbols)
     cerebro.broker = MT5Broker(symbols=symbols)
-    cerebro.broker.setcommission(commission=0.00008)
     
     # Get initial account info (mt5 already imported above)
     account_info = mt5.account_info()
