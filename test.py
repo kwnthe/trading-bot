@@ -13,7 +13,7 @@ os.environ['ZONE_INVERSION_MARGIN_ATR'] = '1'  # Zones Tuning
 os.environ['BREAKOUT_MIN_STRENGTH_ATR'] = '0.2'  # Breakout Tuning
 os.environ['MIN_RISK_DISTANCE_ATR'] = '0.5'
 os.environ['RR'] = '2'
-os.environ['CHECK_FOR_DAILY_RSI'] = 'False'
+os.environ['CHECK_FOR_DAILY_RSI'] = 'True'
 os.environ['EMA_LENGTH'] = '40'
 os.environ['SR_CANCELLATION_THRESHOLD_ATR'] = '0.2'
 os.environ['SL_BUFFER_ATR'] = '0.3'
@@ -32,11 +32,11 @@ max_candles = None
 #symbols = ['XAGUSD', 'XAUUSD', 'EURUSD']
 symbols = ['XAUUSD']
 timeframe = Timeframe.H1
-# start_date = datetime(2011, 11, 26, 13, 10, 0)
-start_date = datetime(2025, 11, 26, 13, 10, 0)
+start_date = datetime(2011, 11, 26, 13, 10, 0)
+# start_date = datetime(2023, 11, 26, 13, 10, 0)
 # 2026-01-22_15:23
 # end_date = datetime(2026, 1, 22, 15, 23, 0)
-end_date = datetime(2026, 12, 22, 15, 23, 0)
+end_date = datetime(2017, 12, 22, 15, 23, 0)
 # end_date = datetime.now()
 
 

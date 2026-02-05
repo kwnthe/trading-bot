@@ -123,10 +123,10 @@ class BreakRetestStrategy(BaseStrategy):
         breakout_trend = state['breakout_trend']
 
         current_position_on_this_symbol = self.open_positions_summary[data_index]
-        if breakout_trend == Trend.UPTREND and current_position_on_this_symbol < 0:
-            return
-        if breakout_trend == Trend.DOWNTREND and current_position_on_this_symbol > 0:
-            return
+        # if breakout_trend == Trend.UPTREND and current_position_on_this_symbol < 0:
+        #     return
+        # if breakout_trend == Trend.DOWNTREND and current_position_on_this_symbol > 0:
+        #     return
         
         if support is None or resistance is None:
             return
