@@ -1,3 +1,6 @@
+from pathlib import Path
+import sys
+
 from src.models.trend import Trend
 from src.strategies.BaseStrategy import BaseStrategy
 from src.models.order import OrderType, TradeState, OrderSide, log_trade
@@ -9,6 +12,13 @@ from src.utils.environment_variables import EnvironmentVariables
 from src.utils.trade_confirmations import RSIConfirmations
 import uuid
 from src.models.chart_markers import ChartMarkerType
+
+# Ensure project root on path for ml package
+_root = Path(__file__).resolve().parent.parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+from ml.AiOrderFilter import AiOrderFilter
+from ml.order_filter_features import build_order_filter_features
 
 class BreakRetestStrategy(BaseStrategy):
     params = BaseStrategy._base_params + ()
@@ -24,6 +34,8 @@ class BreakRetestStrategy(BaseStrategy):
         # Track last processed timestamp to prevent duplicate processing
         # Use timestamp only since bar numbers reset on each run()
         self.last_processed_timestamp = None
+
+        self.ai_filter = AiOrderFilter(model_path=str(Path(Config.ai_order_filter_model_path))) 
 
     # ----------------------- NEXT -----------------------  
     def next(self):  
@@ -71,10 +83,17 @@ class BreakRetestStrategy(BaseStrategy):
                 current_bar_time.weekday() != 0,  # Don't take orders on Monday (0 = Monday)
             ]
             if not is_backfilling_live_mode and all(order_confirmations):
-                # Get the data feed for this symbol
-                data = data_indicators[i]['data']
-                self.place_retest_order_for_data(i)
-                self.set_chart_marker(self.candle_index, current_price, data_feed_index=i, marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
+                take_trade = True
+                if self.ai_filter and pair_state.get('support') is not None and pair_state.get('resistance') is not None:
+                    entry_price, sl, tp = self._entry_sl_tp_for_zone(pair_state, data_indicators[i])
+                    if entry_price is not None:
+                        features = build_order_filter_features(
+                            data_indicators[i], pair_state['breakout_trend'], entry_price, sl, tp
+                        )
+                        take_trade = self.ai_filter.predict(features) >= getattr(self.ai_filter, 'best_threshold', 0.5)
+                if take_trade:
+                    self.place_retest_order_for_data(i)
+                    self.set_chart_marker(self.candle_index, current_price, data_feed_index=i, marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
             self.invalidate_pending_trades_if_sr_changed_or_completed(i)  
             self.process_pending_trade_updates(i)
 
@@ -93,6 +112,27 @@ class BreakRetestStrategy(BaseStrategy):
                     trade['highest_excursion_from_breakout'] = max(trade['highest_excursion_from_breakout'], abs(high_price - trade['entry_price']))
                 else:
                     trade['highest_excursion_from_breakout'] = max(trade['highest_excursion_from_breakout'], abs(low_price - trade['entry_price']))
+
+    def _entry_sl_tp_for_zone(self, pair_state, indicators):
+        """Return (entry_price, sl, tp) for the zone; (None, None, None) if not computable."""
+        support = pair_state['support']
+        resistance = pair_state['resistance']
+        breakout_trend = pair_state['breakout_trend']
+        symbol = indicators['symbol']
+        atr_val = indicators['atr'][0] if len(indicators['atr']) > 0 else None
+        if atr_val is None or atr_val <= 0:
+            return (None, None, None)
+        risk_distance = abs(resistance - support)
+        sl_buffer = convert_atr_to_price(atr_val, EnvironmentVariables.SL_BUFFER_ATR, symbol)
+        if breakout_trend == Trend.UPTREND:
+            entry_price = resistance
+            sl = support - sl_buffer
+            tp = entry_price + risk_distance * self.params.rr
+        else:
+            entry_price = support
+            sl = resistance + sl_buffer
+            tp = entry_price - risk_distance * self.params.rr
+        return (entry_price, sl, tp)
 
     def place_retest_order_for_data(self, data_index):  
         """Place retest order for a specific data feed."""

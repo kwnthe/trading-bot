@@ -32,12 +32,13 @@ max_candles = None
 #symbols = ['XAGUSD', 'XAUUSD', 'EURUSD']
 symbols = ['XAUUSD']
 timeframe = Timeframe.H1
-start_date = datetime(2011, 11, 26, 13, 10, 0)
+# start_date = datetime(2011, 11, 26, 13, 10, 0)
+start_date = datetime(2020, 11, 26, 13, 10, 0)
 # start_date = datetime(2023, 11, 26, 13, 10, 0)
 # 2026-01-22_15:23
 # end_date = datetime(2026, 1, 22, 15, 23, 0)
-end_date = datetime(2017, 12, 22, 15, 23, 0)
-# end_date = datetime.now()
+# end_date = datetime(2017, 12, 22, 15, 23, 0)
+end_date = datetime.now()
 
 
 

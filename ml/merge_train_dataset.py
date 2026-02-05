@@ -9,13 +9,15 @@ def get_clean_training_data(file_path):
     valid_states = ['TP_HIT', 'SL_HIT']
     df_clean = df[df['state'].isin(valid_states)].copy()
     
-    # 3. Select your "Scale-Agnostic" features
+    # 3. Select your "Scale-Agnostic" features (from CSV columns)
     features = [
-        'rsi_at_break', 
-        'time_to_fill', 
-        'relative_volume', 
-        'atr_rel_excursion', 
-        'atr_breakout_wick'
+        'rsi_at_break',
+        'time_to_fill',
+        'relative_volume',
+        'atr_rel_excursion',
+        'atr_breakout_wick',
+        'atr_sl_dist',
+        'atr_tp_dist',
     ]
     
     # 4. Final selection and Target encoding
@@ -25,7 +27,7 @@ def get_clean_training_data(file_path):
     # Convert state to binary: 1 = Win (TP), 0 = Loss (SL)
     df_final['target'] = (df_final['state'] == 'TP_HIT').astype(int)
     
-    return df_final.drop(columns=['state'])
+    return df_final
 
 # Usage
 df_silver = get_clean_training_data('data/XAGUSD.csv')
@@ -35,4 +37,4 @@ df_gold = get_clean_training_data('data/XAUUSD.csv')
 df_train = pd.concat([df_silver, df_gold], axis=0).reset_index(drop=True)
 
 # 6. Save the final dataset
-df_train.to_csv('data/forex/example.csv', index=False)
+df_train.to_csv('data/example.csv', index=False)

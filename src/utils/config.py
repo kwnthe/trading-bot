@@ -54,6 +54,8 @@ class Configuration(BaseSettings):
     # Mac remote fetching of csv data
     backtest_fetch_csv_url: Optional[str] = Field(default=None)  # URL of the fetch server
 
+    ai_order_filter_model_path: Optional[str] = Field(default=None, description="Path to metals.joblib; env: AI_ORDER_FILTER_MODEL_PATH")
+
     
     class Config:
         env_file = ".env"
