@@ -18,7 +18,7 @@ from strategies.BreakRetestStrategy import BreakRetestStrategy
 from src.observers.buy_sell_observer import BuySellObserver
 from src.utils.backtesting import prepare_backtesting
 from src.models.timeframe import Timeframe
-from src.utils.plot import plotly_plot
+from src.utils.plot import render_tv_chart
 from src.brokers.backtesting_broker import BacktestingBroker
 from src.utils.strategy_utils.general_utils import convert_pips_to_price, convert_micropips_to_price
 from src.brokers.ForexLeverage import ForexLeverage
@@ -736,6 +736,6 @@ if __name__ == '__main__':
         stats = results['stats']
         if args.chart:
             for symbol_index, (symbol, pair_data) in enumerate(data.items()):
-                plotly_plot(cerebro, pair_data, symbol, symbol_index=symbol_index, height=700)
+                render_tv_chart(cerebro, pair_data, symbol, symbol_index=symbol_index, height=700)
 
     

@@ -2,7 +2,6 @@ import sys
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-import multiprocessing as mp
 original_stdout = sys.stdout
 original_stderr = sys.stderr
 # sys.stdout = open(os.devnull, 'w')
@@ -26,38 +25,28 @@ if os.path.basename(notebook_dir) == "notebooks":
         sys.path.insert(0, parent_dir)
 from src.utils.config import Config
 from src.models.timeframe import Timeframe
-from src.utils.plot import render_tv_chart
+from src.utils.plot import plotly_plot
 from main import backtesting
 
 max_candles = None
 #symbols = ['XAGUSD', 'XAUUSD', 'EURUSD']
-symbols = ['XAGUSD']
+symbols = ['USDJPY']
 timeframe = Timeframe.H1
-# start_date = datetime(2011, 11, 26, 13, 10, 0)
-start_date = datetime(2021, 11, 26, 13, 10, 0)
+start_date = datetime(2011, 11, 26, 13, 10, 0)
 # start_date = datetime(2023, 11, 26, 13, 10, 0)
 # 2026-01-22_15:23
 # end_date = datetime(2026, 1, 22, 15, 23, 0)
-# end_date = datetime(2021, 12, 22, 15, 23, 0)
-end_date = datetime.now()
+end_date = datetime(2025, 12, 22, 15, 23, 0)
+# end_date = datetime.now()
 
 
-def main():
-    res = backtesting(
-            symbols=symbols,
-            timeframe=timeframe,
-            start_date=start_date,
-            end_date=end_date,
-            max_candles=max_candles)
 
-    for symbol_index, (symbol, pair_data) in enumerate(res['data'].items()):
-        # plotly_plot(res['cerebro'], pair_data, symbol, symbol_index=symbol_index, height=1400)
-        render_tv_chart(res['cerebro'], pair_data, symbol, symbol_index=symbol_index)
+res = backtesting(
+        symbols=symbols,
+        timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
+        max_candles=max_candles)
 
-
-if __name__ == "__main__":
-    # lightweight_charts starts a child process (macOS uses spawn by default),
-    # so we must protect top-level code to avoid:
-    # "An attempt has been made to start a new process before the current process has finished its bootstrapping phase."
-    mp.freeze_support()
-    main()
+for symbol_index, (symbol, pair_data) in enumerate(res['data'].items()):
+    plotly_plot(res['cerebro'], pair_data, symbol, symbol_index=symbol_index, height=1400)
