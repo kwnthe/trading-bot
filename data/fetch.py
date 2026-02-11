@@ -103,8 +103,19 @@ def fetch_candles(mode, start, end, symbol, timeframe, type_: str = "data"):
             mt5.shutdown()
             raise RuntimeError(f"Failed to select symbol {symbol}")
 
-    if end > datetime.now():
-        end = datetime.now()
+    # Normalize timezone-awareness to avoid comparisons between offset-naive and offset-aware datetimes.
+    if (start.tzinfo is None) != (end.tzinfo is None):
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=end.tzinfo)
+        else:
+            end = end.replace(tzinfo=start.tzinfo)
+    elif start.tzinfo is not None and end.tzinfo is not None and start.tzinfo != end.tzinfo:
+        end = end.astimezone(start.tzinfo)
+
+    now = datetime.now(tz=start.tzinfo) if start.tzinfo is not None else datetime.now()
+
+    if end > now:
+        end = now
 
     if start >= end:
         mt5.shutdown()
