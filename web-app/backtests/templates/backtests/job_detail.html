@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Backtest Job {{ job_id }}</title>
+    <link rel="stylesheet" href="/static/backtests/styles.css?v=3" />
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <div class="row">
+        <a class="link" href="{% url 'index' %}"><span style="font-size: 20">←</span> New backtest</a>
+        <code>{{ job_id }}</code>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="muted">Status</div>
+            <div id="status" class="status">Loading…</div>
+          </div>
+          <div>
+            <select id="symbolSelect"></select>
+          </div>
+        </div>
+      </div>
+
+      <div id="stats" class="card" style="display:none;"></div>
+
+      <div class="card" id="chartPanel">
+        <div class="row chart-header" style="justify-content: space-between; align-items: center;">
+          <h3 style="margin: 0;"> symbol</h3>
+          <div style="float: right;">
+            <button id="fullscreenBtn" style="background: none; border: none; cursor: pointer; font-size: 24px; color: white; font-size: 25px;" type="button">⛶</button>
+          </div>
+        </div>
+        <div id="chart" class="chart"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3>stdout</h3>
+          <pre id="stdout" class="log"></pre>
+        </div>
+        <div class="card">
+          <h3>stderr</h3>
+          <pre id="stderr" class="log"></pre>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.BACKTEST_JOB_ID = "{{ job_id }}";
+    </script>
+    <script src="/static/backtests/app.js?v=11"></script>
+  </body>
+</html>
+
