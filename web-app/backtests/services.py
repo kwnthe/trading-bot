@@ -24,6 +24,7 @@ def start_runner_process(base_dir: Path, paths: JobPaths) -> int:
     env = os.environ.copy()
     # Ensure runner can import repo modules, and that pydantic config reads repo .env
     env["PYTHONPATH"] = str(repo_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["PYTHONUNBUFFERED"] = "1"
 
     stdout_f = paths.stdout_log.open("ab", buffering=0)
     stderr_f = paths.stderr_log.open("ab", buffering=0)
@@ -39,7 +40,7 @@ def start_runner_process(base_dir: Path, paths: JobPaths) -> int:
         popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
 
     p = subprocess.Popen(
-        [runner_python, str(runner), "--job-dir", str(paths.job_dir)],
+        [runner_python, "-u", str(runner), "--job-dir", str(paths.job_dir)],
         cwd=str(repo_root),  # important: makes src/utils/config.py read repo ".env"
         env=env,
         stdout=stdout_f,
@@ -57,6 +58,7 @@ def start_live_runner_process(base_dir: Path, session_dir: Path, stdout_log: Pat
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(repo_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["PYTHONUNBUFFERED"] = "1"
 
     stdout_f = stdout_log.open("ab", buffering=0)
     stderr_f = stderr_log.open("ab", buffering=0)
@@ -68,7 +70,7 @@ def start_live_runner_process(base_dir: Path, session_dir: Path, stdout_log: Pat
         popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
 
     p = subprocess.Popen(
-        [runner_python, str(runner), "--session-dir", str(session_dir)],
+        [runner_python, "-u", str(runner), "--session-dir", str(session_dir)],
         cwd=str(repo_root),
         env=env,
         stdout=stdout_f,
