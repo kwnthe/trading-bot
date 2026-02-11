@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, MouseEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { useAppDispatch, useAppSelector } from '../store/hooks'
@@ -13,6 +13,8 @@ import Layout from '../components/Layout'
 import Card from '../components/Card'
 import Accordion from '../components/Accordion'
 import Button from '../components/Button'
+import { deletePreset } from '../store/slices/presetsSlice'
+import { hydrateFavorites, removeFavoriteAndPersist } from '../store/slices/favoritesSlice'
 
 function groupDefs(defs: ParamDef[]) {
   const groups = new Map<string, ParamDef[]>()
@@ -51,6 +53,7 @@ type RecentBacktest = {
   startDate?: string
   endDate?: string
   createdAt: number
+  name?: string
 }
 
 const RECENT_KEY = 'recent_backtests'
@@ -107,6 +110,7 @@ export default function BacktestFormPage() {
   const presetsLoading = useAppSelector((s) => s.presets.loading)
   const jobLoading = useAppSelector((s) => s.job.loading)
   const jobError = useAppSelector((s) => s.job.error)
+  const favorites = useAppSelector((s) => s.favorites.items)
 
   const [presetSelected, setPresetSelected] = useState('')
   const [presetName, setPresetName] = useState('')
@@ -116,6 +120,7 @@ export default function BacktestFormPage() {
   const [recent, setRecent] = useState<RecentBacktest[]>(() => loadRecent())
 
   const groups = useMemo(() => groupDefs(schemaDefs), [schemaDefs])
+  const favoriteIds = useMemo(() => new Set(favorites.map((f) => f.jobId)), [favorites])
   const defsByName = useMemo(() => {
     const m = new Map<string, ParamDef>()
     for (const d of schemaDefs) m.set(d.name, d)
@@ -125,6 +130,7 @@ export default function BacktestFormPage() {
   useEffect(() => {
     dispatch(fetchParamSchema())
     dispatch(fetchPresetNames())
+    dispatch(hydrateFavorites())
 
     // Cookie restore (like the Django app)
     try {
@@ -142,6 +148,21 @@ export default function BacktestFormPage() {
   }, [dispatch])
 
   useEffect(() => {
+    const refresh = () => dispatch(hydrateFavorites())
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', refresh)
+    window.addEventListener('storage', refresh)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('storage', refresh)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [])
+
+  useEffect(() => {
     if (schemaLoading) return
     if (schemaError) return
     if (restoredFromCookie) return
@@ -157,6 +178,23 @@ export default function BacktestFormPage() {
     try {
       const data = await dispatch(fetchPreset(name)).unwrap()
       dispatch(setAllParams(data.values || {}))
+    } catch (e: any) {
+      setPresetError(String(e?.message || e))
+    }
+  }
+  
+
+  async function onDeletePreset() {
+    if(!window.confirm("Are you sure you want to delete this preset?")) {
+      return;
+    }
+    setPresetError(null)
+    const name = presetSelected.trim()
+    if (!name) return
+    try {
+      await dispatch(deletePreset(name)).unwrap()
+      setPresetSelected('')
+      await dispatch(fetchPresetNames())
     } catch (e: any) {
       setPresetError(String(e?.message || e))
     }
@@ -280,13 +318,6 @@ export default function BacktestFormPage() {
   return (
     <Layout
       title="Backtesting Dashboard"
-      right={
-        <div className="pill">
-          <span className="muted">Tips</span>
-          <span className="kbd">Search</span>
-          <span className="muted">fields</span>
-        </div>
-      }
     >
       <div className="split">
         <div>
@@ -335,6 +366,7 @@ export default function BacktestFormPage() {
                 </select>
               </div>
               <Button onClick={onLoadPreset} disabled={!presetSelected || presetsLoading}>Load</Button>
+              <Button onClick={onDeletePreset} disabled={!presetSelected || presetsLoading}>🗑️</Button>
             </div>
 
             <div style={{ height: 12 }} />
@@ -365,6 +397,69 @@ export default function BacktestFormPage() {
 
           <div style={{ height: 14 }} />
 
+          <Card title={<span style={{ fontWeight: 850 }}>Favorite Backtests</span>}>
+            {favorites.length ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {favorites
+                  .slice()
+                  .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+                  .map((r) => {
+                    const sym = r.symbols.split(',').map((s) => s.trim()).filter(Boolean)
+                    const symLabel = sym.length ? (sym.length === 1 ? sym[0] : `${sym[0]} +${sym.length - 1}`) : '(no symbols)'
+                    const range = [fmtDate(r.startDate), fmtDate(r.endDate)].filter(Boolean).join(' → ')
+                    function handleUnfavorite(e: MouseEvent) {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      if (window.confirm('Remove this backtest from favorites?')) {
+                        dispatch(removeFavoriteAndPersist(r.jobId))
+                      }
+                    }
+                    return (
+                      <Link
+                        key={r.jobId}
+                        className="pill row"
+                        to={`/jobs/${r.jobId}`}
+                        style={{ alignItems: 'center', gap: 10, textDecoration: 'none' }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {r.name ? (
+                            <>
+                              <b>{r.name}</b>&nbsp;
+                              <em>{symLabel} · {range || r.jobId}</em>
+                            </>
+                          ) : (
+                            <>
+                              <b>{symLabel}</b>
+                              <span className="muted">{range || r.jobId}</span>
+                            </>
+                          )}
+                        </div>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={handleUnfavorite}
+                          title="Remove from favorites"
+                          style={{
+                            color: '#facc15',
+                            fontSize: '1.4rem',
+                            cursor: 'pointer',
+                            padding: 4,
+                            flex: '0 0 auto',
+                          }}
+                        >
+                          ★
+                        </span>
+                      </Link>
+                    )
+                  })}
+              </div>
+            ) : (
+              <div className="muted">No favorites yet. Open a result and star it.</div>
+            )}
+          </Card>
+
+          <div style={{ height: 14 }} />
+
           <Card title={<span style={{ fontWeight: 850 }}>Recent Backtests</span>}>
             {recent.length ? (
               <div style={{ display: 'grid', gap: 10 }}>
@@ -373,9 +468,21 @@ export default function BacktestFormPage() {
                   const symLabel = sym.length ? (sym.length === 1 ? sym[0] : `${sym[0]} +${sym.length - 1}`) : '(no symbols)'
                   const range = [fmtDate(r.startDate), fmtDate(r.endDate)].filter(Boolean).join(' → ')
                   return (
-                    <Link key={r.jobId} className="pill" to={`/jobs/${r.jobId}`}>
-                      <b>{symLabel}</b>
-                      <span className="muted">{range || r.jobId}</span>
+                    <Link
+                      key={r.jobId}
+                      className="pill row"
+                      to={`/jobs/${r.jobId}`}
+                      style={{ alignItems: 'center', gap: 10, textDecoration: 'none' }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <b>{symLabel}</b>
+                        <span className="muted">{range || r.jobId}</span>
+                      </div>
+                      {favoriteIds.has(r.jobId) ? (
+                        <span title="Favorite" style={{ color: '#facc15', fontSize: '1.2rem', padding: 4, flex: '0 0 auto' }}>
+                          ★
+                        </span>
+                      ) : null}
                     </Link>
                   )
                 })}

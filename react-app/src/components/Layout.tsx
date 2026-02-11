@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export default function Layout(props: { title: string; subtitle?: string; right?: ReactNode; children: ReactNode }) {
+export default function Layout(props: { title: ReactNode; subtitle?: string; right?: ReactNode; children: ReactNode }) {
   return (
     <div className="container">
       <div className="appHeader">

@@ -197,6 +197,13 @@ def job_status(request: HttpRequest, job_id: str) -> JsonResponse:
     paths = _paths_for_job(job_id)
     status = read_status(paths)
 
+    params_payload = None
+    try:
+        if paths.params_json.exists():
+            params_payload = json.loads(paths.params_json.read_text(encoding="utf-8"))
+    except Exception:
+        params_payload = None
+
     pid = status.get("pid")
     if status.get("status") == "running" and pid and not is_pid_running(int(pid)):
         # Runner died without updating status.
@@ -213,6 +220,7 @@ def job_status(request: HttpRequest, job_id: str) -> JsonResponse:
         "python_executable": status.get("python_executable"),
         "returncode": status.get("returncode"),
         "error": status.get("error"),
+        "params": params_payload,
         "stdout_tail": tail_text_file(paths.stdout_log),
         "stderr_tail": tail_text_file(paths.stderr_log),
         "has_result": paths.result_json.exists(),

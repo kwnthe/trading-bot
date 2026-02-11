@@ -19,6 +19,11 @@ export interface JobStatusResponse {
   python_executable?: string
   returncode?: number | null
   error?: string | null
+  params?: {
+    backtest_args?: Record<string, any>
+    env_overrides?: Record<string, any>
+    meta?: Record<string, any>
+  } | null
   stdout_tail?: string
   stderr_tail?: string
   has_result?: boolean

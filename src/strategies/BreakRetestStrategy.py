@@ -35,7 +35,7 @@ class BreakRetestStrategy(BaseStrategy):
         # Use timestamp only since bar numbers reset on each run()
         self.last_processed_timestamp = None
 
-        self.ai_filter = AiOrderFilter(model_path=str(Path(Config.ai_order_filter_model_path))) 
+        # self.ai_filter = AiOrderFilter(model_path=str(Path(Config.ai_order_filter_model_path))) 
 
     # ----------------------- NEXT -----------------------  
     def next(self):  
@@ -84,13 +84,13 @@ class BreakRetestStrategy(BaseStrategy):
             ]
             if not is_backfilling_live_mode and all(order_confirmations):
                 take_trade = True
-                if self.ai_filter and pair_state.get('support') is not None and pair_state.get('resistance') is not None:
-                    entry_price, sl, tp = self._entry_sl_tp_for_zone(pair_state, data_indicators[i])
-                    if entry_price is not None:
-                        features = build_order_filter_features(
-                            data_indicators[i], pair_state['breakout_trend'], entry_price, sl, tp
-                        )
-                        take_trade = self.ai_filter.predict(features) >= getattr(self.ai_filter, 'best_threshold', 0.5)
+                # if self.ai_filter and pair_state.get('support') is not None and pair_state.get('resistance') is not None:
+                #     entry_price, sl, tp = self._entry_sl_tp_for_zone(pair_state, data_indicators[i])
+                #     if entry_price is not None:
+                #         features = build_order_filter_features(
+                #             data_indicators[i], pair_state['breakout_trend'], entry_price, sl, tp
+                #         )
+                #         take_trade = self.ai_filter.predict(features) >= getattr(self.ai_filter, 'best_threshold', 0.5)
                 if take_trade:
                     self.place_retest_order_for_data(i)
                     self.set_chart_marker(self.candle_index, current_price, data_feed_index=i, marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
