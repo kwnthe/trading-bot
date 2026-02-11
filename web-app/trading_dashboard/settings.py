@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # .../web-app
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-change-me")
 DEBUG = True
-ALLOWED_HOSTS: list[str] = ["127.0.0.1", "localhost"]
+ALLOWED_HOSTS: list[str] = ["*"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
