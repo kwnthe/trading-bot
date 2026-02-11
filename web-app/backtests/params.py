@@ -110,6 +110,13 @@ PARAM_DEFS: list[ParamDef] = [
     ParamDef(name="CHECK_FOR_DAILY_RSI", label="Check daily RSI", field_type="bool", destination="env", required=False, group="Env overrides", fallback_default=True),
     ParamDef(name="BACKTEST_FETCH_CSV_URL", label="Backtest CSV fetch server URL", field_type="str", destination="env", required=False, group="Env overrides"),
     # ----------------------------
+    # Live trading (MT5)
+    # ----------------------------
+    ParamDef(name="MT5_LOGIN", label="MT5 Login", field_type="int", destination="env", required=False, group="Live (MT5)"),
+    ParamDef(name="MT5_PASSWORD", label="MT5 Password", field_type="str", destination="env", required=False, group="Live (MT5)"),
+    ParamDef(name="MT5_SERVER", label="MT5 Server", field_type="str", destination="env", required=False, group="Live (MT5)"),
+    ParamDef(name="MT5_PATH", label="MT5 Terminal Path", field_type="str", destination="env", required=False, group="Live (MT5)"),
+    # ----------------------------
     # Meta (hidden)
     # ----------------------------
     ParamDef(name="MODE", label="MODE", field_type="hidden", destination="meta", required=False, group="Meta", fallback_default="backtest"),

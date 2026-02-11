@@ -15,6 +15,7 @@ import Accordion from '../components/Accordion'
 import Button from '../components/Button'
 import { deletePreset } from '../store/slices/presetsSlice'
 import { hydrateFavorites, removeFavoriteAndPersist } from '../store/slices/favoritesSlice'
+import { fetchStrategies, setSelectedStrategyId, startLive, stopLive } from '../store/slices/liveSlice'
 
 function groupDefs(defs: ParamDef[]) {
   const groups = new Map<string, ParamDef[]>()
@@ -54,9 +55,53 @@ type RecentBacktest = {
   endDate?: string
   createdAt: number
   name?: string
+  strategy?: string
+}
+
+type RecentLiveRun = {
+  sessionId: string
+  symbols: string
+  timeframe?: string
+  createdAt: number
+  strategy?: string
 }
 
 const RECENT_KEY = 'recent_backtests'
+const RECENT_LIVE_KEY = 'recent_live_runs'
+const MT5_LOCAL_KEY = 'mt5_params'
+
+const MT5_FIELDS = ['MT5_LOGIN', 'MT5_PASSWORD', 'MT5_SERVER', 'MT5_PATH']
+
+function loadMt5Local(): Record<string, any> {
+  try {
+    const raw = localStorage.getItem(MT5_LOCAL_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return {}
+    const out: Record<string, any> = {}
+    for (const k of MT5_FIELDS) {
+      if (k in parsed) out[k] = (parsed as any)[k]
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+function saveMt5Local(values: Record<string, any>) {
+  try {
+    const existing = loadMt5Local()
+    const out: Record<string, any> = { ...existing }
+    for (const k of MT5_FIELDS) {
+      const v = values[k]
+      if (v === undefined || v === null || v === '') continue
+      out[k] = v
+    }
+    localStorage.setItem(MT5_LOCAL_KEY, JSON.stringify(out))
+  } catch {
+    // ignore
+  }
+}
 
 function safeString(v: any): string {
   if (v === null || v === undefined) return ''
@@ -83,6 +128,7 @@ function loadRecent(): RecentBacktest[] {
         startDate: x.startDate ? String(x.startDate) : undefined,
         endDate: x.endDate ? String(x.endDate) : undefined,
         createdAt: typeof x.createdAt === 'number' ? x.createdAt : Date.now(),
+        strategy: (x as { strategy?: string }).strategy ? String((x as { strategy?: string }).strategy) : undefined,
       }))
   } catch {
     return []
@@ -91,7 +137,35 @@ function loadRecent(): RecentBacktest[] {
 
 function saveRecent(items: RecentBacktest[]) {
   try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(items.slice(0, 10)))
+    localStorage.setItem(RECENT_KEY, JSON.stringify(items.slice(0, 4)))
+  } catch {
+    // ignore
+  }
+}
+
+function loadRecentLive(): RecentLiveRun[] {
+  try {
+    const raw = localStorage.getItem(RECENT_LIVE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((x) => x && typeof x === 'object' && typeof x.sessionId === 'string')
+      .map((x) => ({
+        sessionId: String(x.sessionId),
+        symbols: safeString(x.symbols),
+        timeframe: x.timeframe ? String(x.timeframe) : undefined,
+        createdAt: typeof x.createdAt === 'number' ? x.createdAt : Date.now(),
+        strategy: x.strategy ? String(x.strategy) : undefined,
+      }))
+  } catch {
+    return []
+  }
+}
+
+function saveRecentLive(items: RecentLiveRun[]) {
+  try {
+    localStorage.setItem(RECENT_LIVE_KEY, JSON.stringify(items.slice(0, 4)))
   } catch {
     // ignore
   }
@@ -111,6 +185,11 @@ export default function BacktestFormPage() {
   const jobLoading = useAppSelector((s) => s.job.loading)
   const jobError = useAppSelector((s) => s.job.error)
   const favorites = useAppSelector((s) => s.favorites.items)
+  const liveLoading = useAppSelector((s) => s.live.loading)
+  const liveError = useAppSelector((s) => s.live.error)
+  const liveStrategies = useAppSelector((s) => s.live.strategies)
+  const selectedStrategyId = useAppSelector((s) => s.live.selectedStrategyId)
+  const activeLiveSessionId = useAppSelector((s) => s.live.activeSessionId)
 
   const [presetSelected, setPresetSelected] = useState('')
   const [presetName, setPresetName] = useState('')
@@ -118,6 +197,7 @@ export default function BacktestFormPage() {
   const [restoredFromCookie, setRestoredFromCookie] = useState(false)
   const [search, setSearch] = useState('')
   const [recent, setRecent] = useState<RecentBacktest[]>(() => loadRecent())
+  const [recentLive, setRecentLive] = useState<RecentLiveRun[]>(() => loadRecentLive())
 
   const groups = useMemo(() => groupDefs(schemaDefs), [schemaDefs])
   const favoriteIds = useMemo(() => new Set(favorites.map((f) => f.jobId)), [favorites])
@@ -131,6 +211,7 @@ export default function BacktestFormPage() {
     dispatch(fetchParamSchema())
     dispatch(fetchPresetNames())
     dispatch(hydrateFavorites())
+    dispatch(fetchStrategies())
 
     // Cookie restore (like the Django app)
     try {
@@ -138,7 +219,8 @@ export default function BacktestFormPage() {
       if (raw) {
         const values = JSON.parse(decodeURIComponent(raw))
         if (values && typeof values === 'object') {
-          dispatch(setAllParams(values))
+          const mt5Local = loadMt5Local()
+          dispatch(setAllParams({ ...values, ...mt5Local }))
           setRestoredFromCookie(true)
         }
       }
@@ -146,6 +228,13 @@ export default function BacktestFormPage() {
       // ignore
     }
   }, [dispatch])
+
+  useEffect(() => {
+    // Persist MT5 fields so Live credentials autofill across sessions.
+    // Intentionally localStorage (not cookie) per requirement.
+    if (!params || typeof params !== 'object') return
+    saveMt5Local(params)
+  }, [params])
 
   useEffect(() => {
     const refresh = () => dispatch(hydrateFavorites())
@@ -163,12 +252,23 @@ export default function BacktestFormPage() {
   }, [])
 
   useEffect(() => {
+    const refresh = () => setRecentLive(loadRecentLive())
+    window.addEventListener('focus', refresh)
+    window.addEventListener('storage', refresh)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('storage', refresh)
+    }
+  }, [])
+
+  useEffect(() => {
     if (schemaLoading) return
     if (schemaError) return
     if (restoredFromCookie) return
     if (!schemaDefs.length) return
     if (Object.keys(params || {}).length) return
-    dispatch(setAllParams(schemaInitial || {}))
+    const mt5Local = loadMt5Local()
+    dispatch(setAllParams({ ...(schemaInitial || {}), ...mt5Local }))
   }, [dispatch, schemaDefs.length, schemaError, schemaInitial, schemaLoading, restoredFromCookie, params])
 
   async function onLoadPreset() {
@@ -230,6 +330,7 @@ export default function BacktestFormPage() {
       const def = defsByName.get(k)
       payload[k] = def ? castValue(def, v) : v
     }
+    payload.strategy = selectedStrategyId || 'break_retest'
 
     const resp = await dispatch(runBacktest(payload)).unwrap()
 
@@ -239,12 +340,44 @@ export default function BacktestFormPage() {
       startDate: safeString(payload.start_date || ''),
       endDate: safeString(payload.end_date || ''),
       createdAt: Date.now(),
+      strategy: selectedStrategyId || undefined,
     }
 
-    const next = [entry, ...loadRecent().filter((x) => x.jobId !== entry.jobId)].slice(0, 10)
+    const next = [entry, ...loadRecent().filter((x) => x.jobId !== entry.jobId)].slice(0, 4)
     saveRecent(next)
     setRecent(next)
     navigate(`/jobs/${resp.job_id}`)
+  }
+
+  async function onRunLive(e: MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (activeLiveSessionId) return
+
+    const sym = safeString(params.symbols || '')
+    const tf = safeString(params.timeframe || '')
+    if (!sym.trim() || !tf.trim()) {
+      window.alert('Please set Symbols and Timeframe before starting Live.')
+      return
+    }
+
+    const payload: Record<string, any> = {
+      ...params,
+      strategy: selectedStrategyId || 'break_retest',
+    }
+
+    const resp = await dispatch(startLive(payload)).unwrap()
+    const entry: RecentLiveRun = {
+      sessionId: resp.session_id,
+      symbols: sym,
+      timeframe: tf,
+      createdAt: Date.now(),
+      strategy: selectedStrategyId || undefined,
+    }
+    const next = [entry, ...loadRecentLive().filter((x) => x.sessionId !== entry.sessionId)].slice(0, 4)
+    saveRecentLive(next)
+    setRecentLive(next)
+    navigate(`/live/${resp.session_id}`)
   }
 
   const filteredGroups = useMemo(() => {
@@ -317,12 +450,12 @@ export default function BacktestFormPage() {
 
   return (
     <Layout
-      title="Backtesting Dashboard"
+      title="Dashboard"
     >
       <div className="split">
         <div>
           <Card
-            title={<span style={{ fontWeight: 850 }}>Run configuration</span>}
+            title={<span style={{ fontWeight: 850 }}>General</span>}
             right={
               <div className="row" style={{ minWidth: 340 }}>
                 <input
@@ -342,11 +475,28 @@ export default function BacktestFormPage() {
               {filteredGroups.map(([group, items]) => (
                 <Accordion
                   key={group}
-                  title={group}
+                  title={group === 'Backtest' ? 'General' : group}
                   defaultOpen={true}
                   right={<span className="muted">{items.length} fields</span>}
                 >
                   {items.length ? <div className="grid">{items.map(renderField)}</div> : <div className="muted">No matches.</div>}
+                  {group === 'Backtest' ? (
+                    <div style={{ marginTop: 12 }}>
+                      <div className="fieldLabel" style={{ marginBottom: 8 }}>Strategy</div>
+                      <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+                        <select
+                          className="select"
+                          value={selectedStrategyId}
+                          onChange={(e) => dispatch(setSelectedStrategyId(e.target.value))}
+                          style={{ minWidth: 240 }}
+                        >
+                          {(liveStrategies || []).map((s) => (
+                            <option key={s.id} value={s.id}>{s.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ) : null}
                 </Accordion>
               ))}
             </div>
@@ -387,12 +537,69 @@ export default function BacktestFormPage() {
           <Card title={<span style={{ fontWeight: 850 }}>Run</span>}>
             <form onSubmit={onSubmit}>
               <div className="row">
-                <Button variant="primary" type="submit" disabled={jobLoading || schemaLoading || !!schemaError}>
-                  Run backtest
+                <Button type="submit" disabled={jobLoading}>
+                  {jobLoading ? 'Running…' : 'Run Backtest'}
                 </Button>
-                {jobError ? <span className="muted">{jobError}</span> : <span className="muted">Starts a new runner process.</span>}
+                <Button type="button" disabled={Boolean(activeLiveSessionId) || liveLoading} onClick={onRunLive}>
+                  {activeLiveSessionId ? 'Live Running…' : liveLoading ? 'Starting Live…' : 'Run Live'}
+                </Button>
               </div>
+              {jobError && <span className="muted">{jobError}</span>}
+              {liveError ? <div className="muted"><b>Live error:</b> {liveError}</div> : null}
             </form>
+          </Card>
+
+          <div style={{ height: 14 }} />
+
+          <Card title={<span style={{ fontWeight: 850 }}>Live Session</span>}>
+            {activeLiveSessionId ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                <Link className="pill" to={`/live/${activeLiveSessionId}`} style={{ textDecoration: 'none' }}>
+                  <b>Active:</b> <span className="muted">{activeLiveSessionId}</span>
+                </Link>
+                <Button type="button" onClick={() => dispatch(stopLive(activeLiveSessionId))}>
+                  Stop Live
+                </Button>
+                <div className="muted">Run Live is disabled while a session is active.</div>
+              </div>
+            ) : (
+              <div className="muted">No live session running.</div>
+            )}
+          </Card>
+
+          <Card title={<span style={{ fontWeight: 850 }}>Recent Live Runs</span>}>
+            {recentLive.length ? (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {recentLive.slice(0, 4).map((r) => {
+                  const sym = r.symbols.split(',').map((s) => s.trim()).filter(Boolean)
+                  const symLabel = sym.length ? (sym.length === 1 ? sym[0] : `${sym[0]} +${sym.length - 1}`) : '(no symbols)'
+                  const isRunning = r.sessionId === activeLiveSessionId
+                  return (
+                    <Link
+                      key={r.sessionId}
+                      className="pill row"
+                      to={`/live/${r.sessionId}`}
+                      style={{
+                        alignItems: 'center',
+                        gap: 10,
+                        textDecoration: 'none',
+                        ...(isRunning ? { background: 'rgba(34, 197, 94, 0.22)', borderColor: 'rgba(34, 197, 94, 0.5)' } : {}),
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <b>{symLabel}</b>&nbsp;
+                        <span className="muted">{r.timeframe || ''}</span>
+                      </div>
+                      {r.strategy ? (
+                        <span className="muted" style={{ flex: '0 0 auto' }}>{r.strategy}</span>
+                      ) : null}
+                    </Link>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="muted">No live runs yet.</div>
+            )}
           </Card>
 
           <div style={{ height: 14 }} />
@@ -463,7 +670,7 @@ export default function BacktestFormPage() {
           <Card title={<span style={{ fontWeight: 850 }}>Recent Backtests</span>}>
             {recent.length ? (
               <div style={{ display: 'grid', gap: 10 }}>
-                {recent.map((r) => {
+                {recent.slice(0, 4).map((r) => {
                   const sym = r.symbols.split(',').map((s) => s.trim()).filter(Boolean)
                   const symLabel = sym.length ? (sym.length === 1 ? sym[0] : `${sym[0]} +${sym.length - 1}`) : '(no symbols)'
                   const range = [fmtDate(r.startDate), fmtDate(r.endDate)].filter(Boolean).join(' → ')
@@ -475,9 +682,12 @@ export default function BacktestFormPage() {
                       style={{ alignItems: 'center', gap: 10, textDecoration: 'none' }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <b>{symLabel}</b>
+                        <b>{symLabel}</b>&nbsp;
                         <span className="muted">{range || r.jobId}</span>
                       </div>
+                      {r.strategy ? (
+                        <span className="muted" style={{ flex: '0 0 auto' }}>{r.strategy}</span>
+                      ) : null}
                       {favoriteIds.has(r.jobId) ? (
                         <span title="Favorite" style={{ color: '#facc15', fontSize: '1.2rem', padding: 4, flex: '0 0 auto' }}>
                           ★

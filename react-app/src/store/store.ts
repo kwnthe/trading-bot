@@ -5,6 +5,7 @@ import paramSchemaReducer from './slices/paramSchemaSlice'
 import presetsReducer from './slices/presetsSlice'
 import jobReducer from './slices/jobSlice'
 import favoritesReducer from './slices/favoritesSlice'
+import liveReducer from './slices/liveSlice'
 
 export const store = configureStore({
   reducer: {
@@ -13,6 +14,7 @@ export const store = configureStore({
     presets: presetsReducer,
     job: jobReducer,
     favorites: favoritesReducer,
+    live: liveReducer,
   },
 })
 

@@ -6,8 +6,10 @@ import './index.css'
 import App from './App.tsx'
 import { store } from './store/store'
 import { hydrateFavorites } from './store/slices/favoritesSlice'
+import { fetchActiveLiveSession } from './store/slices/liveSlice'
 
 store.dispatch(hydrateFavorites())
+store.dispatch(fetchActiveLiveSession())
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

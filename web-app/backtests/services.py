@@ -43,3 +43,26 @@ def start_runner_process(base_dir: Path, paths: JobPaths) -> int:
     write_status(paths, {"status": "running", "pid": p.pid, "python_executable": runner_python})
     return p.pid
 
+
+def start_live_runner_process(base_dir: Path, session_dir: Path, stdout_log: Path, stderr_log: Path) -> int:
+    runner = base_dir / "backtests" / "runner" / "run_live.py"
+    repo_root = repo_root_from_webapp(base_dir)
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+    stdout_f = stdout_log.open("ab", buffering=0)
+    stderr_f = stderr_log.open("ab", buffering=0)
+
+    runner_python = os.environ.get("BACKTEST_RUNNER_PYTHON") or sys.executable
+
+    p = subprocess.Popen(
+        [runner_python, str(runner), "--session-dir", str(session_dir)],
+        cwd=str(repo_root),
+        env=env,
+        stdout=stdout_f,
+        stderr=stderr_f,
+    )
+
+    return p.pid
+
