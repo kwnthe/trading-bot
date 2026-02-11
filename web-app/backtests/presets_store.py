@@ -18,11 +18,16 @@ def load_presets(base_dir: Path) -> dict[str, dict[str, Any]]:
     path = presets_path(base_dir)
     if not path.exists():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
-    presets = data.get("presets", {})
-    if not isinstance(presets, dict):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        presets = data.get("presets", {})
+        if not isinstance(presets, dict):
+            return {}
+        return presets
+    except Exception:
         return {}
-    return presets
 
 
 def save_presets(base_dir: Path, presets: dict[str, dict[str, Any]]) -> None:
