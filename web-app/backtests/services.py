@@ -32,12 +32,19 @@ def start_runner_process(base_dir: Path, paths: JobPaths) -> int:
     # Example: export BACKTEST_RUNNER_PYTHON="/path/to/venv/bin/python"
     runner_python = os.environ.get("BACKTEST_RUNNER_PYTHON") or sys.executable
 
+    popen_kwargs: dict[str, object] = {}
+    if os.name == "nt":
+        # Detach child process from the dev-server console so Ctrl+C / reload
+        # doesn't propagate KeyboardInterrupt into the runner.
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+
     p = subprocess.Popen(
         [runner_python, str(runner), "--job-dir", str(paths.job_dir)],
         cwd=str(repo_root),  # important: makes src/utils/config.py read repo ".env"
         env=env,
         stdout=stdout_f,
         stderr=stderr_f,
+        **popen_kwargs,
     )
 
     write_status(paths, {"status": "running", "pid": p.pid, "python_executable": runner_python})
@@ -56,12 +63,17 @@ def start_live_runner_process(base_dir: Path, session_dir: Path, stdout_log: Pat
 
     runner_python = os.environ.get("BACKTEST_RUNNER_PYTHON") or sys.executable
 
+    popen_kwargs: dict[str, object] = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+
     p = subprocess.Popen(
         [runner_python, str(runner), "--session-dir", str(session_dir)],
         cwd=str(repo_root),
         env=env,
         stdout=stdout_f,
         stderr=stderr_f,
+        **popen_kwargs,
     )
 
     return p.pid
