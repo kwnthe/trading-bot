@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -105,14 +106,42 @@ def create_live_session(base_dir: Path, params: dict[str, Any]) -> tuple[str, Li
 def read_live_status(paths: LivePaths) -> dict[str, Any]:
   if not paths.status_json.exists():
     return {'state': 'unknown', 'error': 'Missing status.json'}
-  return json.loads(paths.status_json.read_text(encoding='utf-8'))
+  last_err: Exception | None = None
+  for attempt in range(6):
+    try:
+      return json.loads(paths.status_json.read_text(encoding='utf-8'))
+    except (PermissionError, json.JSONDecodeError) as e:
+      last_err = e
+      time.sleep(0.03 * (attempt + 1))
+    except Exception as e:
+      last_err = e
+      break
+  return {'state': 'unknown', 'error': f'Failed to read status.json: {last_err}'}
 
 
 def write_live_status(paths: LivePaths, patch: dict[str, Any]) -> None:
   status = read_live_status(paths)
   status.update(patch)
   status['updated_at'] = _now_iso()
-  paths.status_json.write_text(json.dumps(status, indent=2), encoding='utf-8')
+  # Atomic write (Windows-friendly): write temp then replace, retry briefly if locked.
+  tmp = paths.status_json.with_name(paths.status_json.name + f'.{os.getpid()}.tmp')
+  tmp.write_text(json.dumps(status, indent=2), encoding='utf-8')
+  last_err: Exception | None = None
+  for attempt in range(6):
+    try:
+      os.replace(tmp, paths.status_json)
+      last_err = None
+      break
+    except PermissionError as e:
+      last_err = e
+      time.sleep(0.03 * (attempt + 1))
+  if last_err is not None:
+    try:
+      if tmp.exists():
+        tmp.unlink()
+    except Exception:
+      pass
+    return
 
 
 def tail_text_file(path: Path, max_bytes: int = 32_000) -> str:

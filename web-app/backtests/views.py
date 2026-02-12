@@ -211,6 +211,11 @@ def api_live_status(request: HttpRequest, session_id: str) -> JsonResponse:
     paths = _paths_for_live(base, session_id)
     status = read_live_status(paths)
 
+    # If status.json was transiently unreadable (Windows file locking), surface as
+    # a retryable response instead of throwing 500s.
+    if status.get("state") == "unknown" and (status.get("error") or "").startswith("Failed to read status.json"):
+        return JsonResponse({"error": "Status not ready, retry"}, status=503)
+
     pid = status.get("pid")
     state = status.get("state")
 

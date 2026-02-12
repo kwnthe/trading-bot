@@ -25,6 +25,7 @@ export default function BacktestChart({ result, symbol }: Props) {
   const candlesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const emaRef = useRef<Line | null>(null)
   const zoneSeriesRef = useRef<Line[]>([])
+  const didFitRef = useRef(false)
 
   const sym = useMemo(() => result?.symbols?.[symbol] || null, [result, symbol])
 
@@ -100,6 +101,7 @@ export default function BacktestChart({ result, symbol }: Props) {
         emaRef.current = null
       }
       removeZones()
+      didFitRef.current = false
       return
     }
 
@@ -144,7 +146,12 @@ export default function BacktestChart({ result, symbol }: Props) {
       zoneSeriesRef.current.push(s)
     }
 
-    chart.timeScale().fitContent()
+    // Avoid resetting user's zoom/scroll on every live polling update.
+    // Auto-fit only once per mount / after clearing.
+    if (!didFitRef.current && nextCandles.length) {
+      chart.timeScale().fitContent()
+      didFitRef.current = true
+    }
   }, [sym])
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
