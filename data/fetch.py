@@ -112,11 +112,7 @@ def fetch_candles(mode, start, end, symbol, timeframe, type_: str = "data"):
     elif start.tzinfo is not None and end.tzinfo is not None and start.tzinfo != end.tzinfo:
         end = end.astimezone(start.tzinfo)
 
-    now = datetime.now(tz=start.tzinfo) if start.tzinfo is not None else datetime.now()
-
-    if end > now:
-        end = now
-
+    
     if start >= end:
         mt5.shutdown()
         raise ValueError("Start time must be before end time")
