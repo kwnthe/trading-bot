@@ -256,9 +256,15 @@ def api_live_snapshot(request: HttpRequest, session_id: str) -> JsonResponse:
 
     base = _base_dir()
     paths = _paths_for_live(base, session_id)
+
     if not paths.snapshot_json.exists():
-        raise Http404("Snapshot not ready")
-    data = json.loads(paths.snapshot_json.read_text(encoding="utf-8"))
+        return JsonResponse({"error": "No snapshot yet"}, status=404)
+
+    try:
+        data = json.loads(paths.snapshot_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        # Runner may be in the middle of writing snapshot.json. Encourage client to retry.
+        return JsonResponse({"error": "Snapshot not ready, retry"}, status=503)
     return JsonResponse(data)
 
 

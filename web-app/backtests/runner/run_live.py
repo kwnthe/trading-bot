@@ -13,7 +13,9 @@ from typing import Any
 
 
 def _write_json(path: Path, payload: Any) -> None:
-  path.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
+  tmp = path.with_name(path.name + '.tmp')
+  tmp.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
+  os.replace(tmp, path)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
