@@ -62,6 +62,14 @@ PARAM_DEFS: list[ParamDef] = [
         fallback_default="H1",
     ),
     ParamDef(
+        name="max_candles",
+        label="Max candles",
+        field_type="int",
+        destination="backtest",
+        required=False,
+        group="Backtest",
+    ),
+    ParamDef(
         name="start_date",
         label="Start date",
         field_type="datetime",
@@ -75,14 +83,6 @@ PARAM_DEFS: list[ParamDef] = [
         field_type="datetime",
         destination="backtest",
         required=True,
-        group="Backtest",
-    ),
-    ParamDef(
-        name="max_candles",
-        label="Max candles",
-        field_type="int",
-        destination="backtest",
-        required=False,
         group="Backtest",
     ),
     ParamDef(
