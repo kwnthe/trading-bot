@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { fetchJobResult, fetchJobStatus, resetJob, setJobId } from '../store/slices/jobSlice'
@@ -35,8 +35,6 @@ export default function JobPage() {
   const error = useAppSelector((s) => s.job.error)
   const schemaDefs = useAppSelector((s) => s.paramSchema.defs)
   const favorites = useAppSelector((s) => s.favorites.items)
-
-  const [currentSymbol, setCurrentSymbol] = useState<string>('')
   const stdoutRef = useRef<HTMLDivElement | null>(null)
   const stderrRef = useRef<HTMLDivElement | null>(null)
 
@@ -85,9 +83,8 @@ export default function JobPage() {
   }, [dispatch, jobIdParam, status?.has_result])
 
   useEffect(() => {
-    if (!symbols.length) return
-    if (!currentSymbol || !symbols.includes(currentSymbol)) setCurrentSymbol(symbols[0])
-  }, [symbols, currentSymbol])
+    // no-op (kept for possible future hydration work)
+  }, [])
 
   useEffect(() => {
     const el = stdoutRef.current
@@ -103,6 +100,13 @@ export default function JobPage() {
 
   const statsEntries = Object.entries(result?.stats || {})
 
+  const statCols = useMemo(() => {
+    const cols = 3
+    const out: Array<Array<[string, any]>> = Array.from({ length: cols }, () => [])
+    for (let i = 0; i < statsEntries.length; i++) out[i % cols].push(statsEntries[i])
+    return out
+  }, [statsEntries])
+
   const paramsEntries = useMemo(() => {
     const p = status?.params
     if (!p) return null
@@ -112,6 +116,21 @@ export default function JobPage() {
     if (p.meta && Object.keys(p.meta).length) sections.push({ title: 'Meta', entries: Object.entries(p.meta) })
     return sections
   }, [status?.params])
+
+  const flatParams = useMemo(() => {
+    const out: Array<[string, any]> = []
+    for (const sec of paramsEntries || []) {
+      for (const [k, v] of sec.entries) out.push([k, v])
+    }
+    return out
+  }, [paramsEntries])
+
+  const paramCols = useMemo(() => {
+    const cols = 3
+    const out: Array<Array<[string, any]>> = Array.from({ length: cols }, () => [])
+    for (let i = 0; i < flatParams.length; i++) out[i % cols].push(flatParams[i])
+    return out
+  }, [flatParams])
 
   function fmtValue(v: any): string {
     if (v === null || v === undefined) return ''
@@ -182,6 +201,27 @@ export default function JobPage() {
       }
       subtitle={jobIdParam ? `Job id: ${jobIdParam}` : undefined}
     >
+      <Card title={<span style={{ fontWeight: 800 }}>Stats</span>}>
+        {statsEntries.length ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr 1px 1fr', gap: 14, alignItems: 'stretch' }}>
+            {statCols.map((col, idx) => (
+              <div key={idx} style={{ display: 'grid', gap: 10 }}>
+                {col.map(([k, v]) => (
+                  <div key={k} className="pill">
+                    <b>{k}</b>
+                    <span className="muted">{String(v)}</span>
+                  </div>
+                ))}
+              </div>
+            )).flatMap((node, idx) => idx === 0 ? [node] : [<div key={`sep-${idx}`} style={{ width: 1, background: 'rgba(255,255,255,0.12)' }} />, node])}
+          </div>
+        ) : (
+          <div className="muted">No stats.</div>
+        )}
+      </Card>
+
+      <div style={{ height: 14 }} />
+
       <Card
         title={
           <div className="row">
@@ -190,76 +230,52 @@ export default function JobPage() {
             <span className="muted">{statusText}</span>
           </div>
         }
-        right={
-          <div className="row" style={{ minWidth: 360 }}>
-            <select className="select" value={currentSymbol} onChange={(e) => setCurrentSymbol(e.target.value)}>
-              {symbols.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          </div>
-        }
       >
         {error ? <div className="muted"><b>Error:</b> {error}</div> : null}
-        <ChartPanel result={result} symbol={currentSymbol} height={520} />
+        {symbols.length ? (
+          <div style={{ display: 'grid', gap: 14 }}>
+            {symbols.map((sym) => (
+              <div key={sym}>
+                <ChartPanel result={result} symbol={sym} height={420} />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="muted">No chart data.</div>
+        )}
       </Card>
 
       <div style={{ height: 14 }} />
 
-      <div className="split">
-        <div>
-          {statsEntries.length ? (
-            <Card title={<span style={{ fontWeight: 800 }}>Stats</span>}>
-              <div className="grid">
-                {statsEntries.map(([k, v]) => (
-                  <div key={k} className="pill">
-                    <b>{k}</b>
-                    <span className="muted">{String(v)}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          ) : (
-            <Card title={<span style={{ fontWeight: 800 }}>Stats</span>}>
-              <div className="muted">No stats.</div>
-            </Card>
-          )}
-
-          <div style={{ height: 14 }} />
-
-          <Card title={<span style={{ fontWeight: 800 }}>Parameters</span>}>
-            {paramsEntries?.length ? (
-              <div style={{ display: 'grid', gap: 12 }}>
-                {paramsEntries.map((sec) => (
-                  <div key={sec.title}>
-                    <div className="muted" style={{ marginBottom: 8 }}>{sec.title}</div>
-                    <div className="grid">
-                      {sec.entries.map(([k, v]) => (
-                        <div key={k} className="pill">
-                          <b>{labelByName.get(k) || k}</b>
-                          <span className="muted">{fmtValue(v)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="muted">No parameters found for this job.</div>
-            )}
-          </Card>
-        </div>
-
-        <div>
-          <Card title={<span style={{ fontWeight: 800 }}>stdout</span>}>
-            <div ref={stdoutRef} className="log">{status?.stdout_tail || ''}</div>
-          </Card>
-          <div style={{ height: 14 }} />
-          <Card title={<span style={{ fontWeight: 800 }}>stderr</span>}>
-            <div ref={stderrRef} className="log">{status?.stderr_tail || ''}</div>
-          </Card>
-        </div>
+      <div className="split" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <Card title={<span style={{ fontWeight: 800 }}>stdout</span>}>
+          <div ref={stdoutRef} className="log">{status?.stdout_tail || ''}</div>
+        </Card>
+        <Card title={<span style={{ fontWeight: 800 }}>stderr</span>}>
+          <div ref={stderrRef} className="log">{status?.stderr_tail || ''}</div>
+        </Card>
       </div>
+
+      <div style={{ height: 14 }} />
+
+      <Card title={<span style={{ fontWeight: 800 }}>Parameters</span>}>
+        {flatParams.length ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr 1px 1fr', gap: 14, alignItems: 'stretch' }}>
+            {paramCols.map((col, idx) => (
+              <div key={idx} style={{ display: 'grid', gap: 10 }}>
+                {col.map(([k, v]) => (
+                  <div key={k} className="pill">
+                    <b>{labelByName.get(k) || k}</b>
+                    <span className="muted">{fmtValue(v)}</span>
+                  </div>
+                ))}
+              </div>
+            )).flatMap((node, idx) => idx === 0 ? [node] : [<div key={`psep-${idx}`} style={{ width: 1, background: 'rgba(255,255,255,0.12)' }} />, node])}
+          </div>
+        ) : (
+          <div className="muted">No parameters found for this job.</div>
+        )}
+      </Card>
     </Layout>
   )
 }

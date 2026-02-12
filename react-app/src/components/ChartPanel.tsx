@@ -15,15 +15,24 @@ type Props = {
 export default function ChartPanel({ result, symbol, height = 520, headerLeft, headerRight }: Props) {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const [chartMountId, setChartMountId] = useState(0)
+  const exitFsTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     const onFs = () => {
       const fs = Boolean(document.fullscreenElement)
-      if (!fs) setChartMountId((v) => v + 1)
+      if (!fs) {
+        if (exitFsTimerRef.current) window.clearTimeout(exitFsTimerRef.current)
+        exitFsTimerRef.current = window.setTimeout(() => {
+          setChartMountId((v) => v + 1)
+        }, 120)
+      }
     }
     document.addEventListener('fullscreenchange', onFs)
     onFs()
-    return () => document.removeEventListener('fullscreenchange', onFs)
+    return () => {
+      document.removeEventListener('fullscreenchange', onFs)
+      if (exitFsTimerRef.current) window.clearTimeout(exitFsTimerRef.current)
+    }
   }, [])
 
   async function toggleFullscreen() {

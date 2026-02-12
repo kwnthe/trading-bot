@@ -7,15 +7,36 @@ import sys
 import time
 import traceback
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 def _write_json(path: Path, payload: Any) -> None:
-  tmp = path.with_name(path.name + '.tmp')
+  # On Windows, os.replace() can temporarily fail with PermissionError if another
+  # process is reading the destination file. Retry briefly instead of crashing.
+  tmp = path.with_name(path.name + f'.{os.getpid()}.tmp')
   tmp.write_text(json.dumps(payload, indent=2, default=str), encoding='utf-8')
-  os.replace(tmp, path)
+
+  last_err: Exception | None = None
+  for attempt in range(6):
+    try:
+      os.replace(tmp, path)
+      last_err = None
+      break
+    except PermissionError as e:
+      last_err = e
+      time.sleep(0.03 * (attempt + 1))
+
+  if last_err is not None:
+    # Best-effort cleanup; keep the previous JSON in place if the destination
+    # is locked.
+    try:
+      if tmp.exists():
+        tmp.unlink()
+    except Exception:
+      pass
+    return
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -141,7 +162,7 @@ def main() -> int:
         prev = _load_json(status_path)
       except Exception:
         prev = {}
-      payload = {**prev, **patch, 'updated_at': datetime.utcnow().isoformat()}
+      payload = {**prev, **patch, 'updated_at': datetime.now(tz=timezone.utc).isoformat()}
       _write_json(status_path, payload)
 
     _status_patch({'state': 'running', 'error': None, 'python_executable': sys.executable})
@@ -273,7 +294,7 @@ def main() -> int:
           'timeframe': timeframe_str,
           'symbols': symbols,
           'latest_seq': latest_seq,
-          'updated_at': datetime.utcnow().isoformat(),
+          'updated_at': datetime.now(tz=timezone.utc).isoformat(),
         },
       }
       _write_json(snapshot_path, snapshot)
