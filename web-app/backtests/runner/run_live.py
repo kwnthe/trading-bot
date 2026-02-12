@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import traceback
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,85 @@ def _repo_root() -> Path:
 
 def _to_unix_seconds(dt: datetime) -> int:
   return int(dt.timestamp())
+
+
+def _segments_from_constant_levels(times_s: list[int], values: list[float]) -> list[dict[str, Any]]:
+  segs: list[dict[str, Any]] = []
+  start_idx: int | None = None
+
+  def is_nan(x: float) -> bool:
+    return x is None or (isinstance(x, float) and math.isnan(x))
+
+  for i, v in enumerate(values):
+    if not is_nan(v) and start_idx is None:
+      start_idx = i
+      continue
+
+    if start_idx is not None:
+      is_last = i == len(values) - 1
+      price_changed = (not is_nan(v)) and (v != values[start_idx])
+
+      if is_nan(v) or price_changed or is_last:
+        end_idx = i if (is_last and not is_nan(v) and not price_changed) else i - 1
+        if end_idx >= start_idx:
+          segs.append({
+            'startTime': times_s[start_idx],
+            'endTime': times_s[end_idx],
+            'value': float(values[start_idx]),
+          })
+        start_idx = i if (not is_nan(v) and price_changed) else None
+
+  return segs
+
+
+def _compute_ema(times_s: list[int], closes: list[float], ema_len: int) -> list[dict[str, Any]]:
+  if not ema_len or ema_len <= 0 or not closes:
+    return []
+  try:
+    import pandas as pd
+
+    ema_vals = pd.Series(closes, dtype='float64').ewm(span=int(ema_len), adjust=False).mean().to_list()
+    out: list[dict[str, Any]] = []
+    for i, val in enumerate(ema_vals):
+      if val is None or (isinstance(val, float) and math.isnan(val)):
+        continue
+      out.append({'time': times_s[i], 'value': float(val)})
+    return out
+  except Exception:
+    return []
+
+
+def _compute_zones(times_s: list[int], highs: list[float], lows: list[float], lookback: int) -> dict[str, Any]:
+  if not times_s or not highs or not lows:
+    return {'resistanceSegments': [], 'supportSegments': []}
+
+  lb = int(lookback or 0)
+  if lb <= 1:
+    lb = 50
+
+  res_levels: list[float] = [float('nan')] * len(times_s)
+  sup_levels: list[float] = [float('nan')] * len(times_s)
+
+  last_res: float | None = None
+  last_sup: float | None = None
+  for i in range(len(times_s)):
+    if i < lb:
+      continue
+    window_high = max(highs[i - lb : i + 1])
+    window_low = min(lows[i - lb : i + 1])
+
+    if last_res is None or window_high != last_res:
+      last_res = float(window_high)
+    if last_sup is None or window_low != last_sup:
+      last_sup = float(window_low)
+
+    res_levels[i] = last_res
+    sup_levels[i] = last_sup
+
+  return {
+    'resistanceSegments': _segments_from_constant_levels(times_s, res_levels),
+    'supportSegments': _segments_from_constant_levels(times_s, sup_levels),
+  }
 
 
 def main() -> int:
@@ -120,6 +200,18 @@ def main() -> int:
 
     latest_seq = 0
 
+    try:
+      from src.utils.config import Config
+
+      default_lookback = int(getattr(Config, 'breakout_lookback_period', 50) or 50)
+    except Exception:
+      default_lookback = 50
+
+    try:
+      ema_len = int(os.environ.get('EMA_LENGTH') or 0)
+    except Exception:
+      ema_len = 0
+
     while True:
       # Basic stats from account
       acct = mt5.account_info()
@@ -137,19 +229,35 @@ def main() -> int:
       for sym in symbols:
         rates = mt5.copy_rates_from_pos(sym, tf, 0, int(args.max_candles))
         candles = []
+        times_s: list[int] = []
+        highs: list[float] = []
+        lows: list[float] = []
+        closes: list[float] = []
         if rates is not None:
           for r in rates:
+            ts = int(r['time'])
+            o = float(r['open'])
+            h = float(r['high'])
+            l = float(r['low'])
+            c = float(r['close'])
             candles.append({
-              'time': int(r['time']),
-              'open': float(r['open']),
-              'high': float(r['high']),
-              'low': float(r['low']),
-              'close': float(r['close']),
+              'time': ts,
+              'open': o,
+              'high': h,
+              'low': l,
+              'close': c,
             })
+            times_s.append(ts)
+            highs.append(h)
+            lows.append(l)
+            closes.append(c)
+
+        ema = _compute_ema(times_s, closes, ema_len)
+        zones = _compute_zones(times_s, highs, lows, default_lookback)
         out_symbols[sym] = {
           'candles': candles,
-          'ema': [],
-          'zones': {'resistanceSegments': [], 'supportSegments': []},
+          'ema': ema,
+          'zones': zones,
           'markers': [],
           'orderBoxes': [],
         }

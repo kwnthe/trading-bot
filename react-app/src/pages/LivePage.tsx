@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import Layout from '../components/Layout'
 import Card from '../components/Card'
 import Button from '../components/Button'
-import BacktestChart from '../components/BacktestChart'
+import ChartPanel from '../components/ChartPanel'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { fetchLiveSnapshot, fetchLiveStatus, setActiveSessionId, stopLive } from '../store/slices/liveSlice'
 
@@ -104,14 +104,15 @@ export default function LivePage() {
             {symbols.length ? (
               <div style={{ display: 'grid', gap: 14 }}>
                 {symbols.map((sym) => (
-                  <div key={sym} className="chartPanel" style={{ height: 420 }}>
-                    <div className="row" style={{ marginBottom: 8 }}>
-                      <span style={{ fontWeight: 850 }}>{sym}</span>
-                      <span className="muted" style={{ marginLeft: 'auto' }}>
-                        {(snapshot as any)?.meta?.timeframe || ''}
-                      </span>
-                    </div>
-                    <BacktestChart result={snapshot} symbol={sym} />
+                  <div key={sym}>
+                    <ChartPanel
+                      result={snapshot}
+                      symbol={sym}
+                      height={420}
+                      headerRight={
+                        <span className="muted">{(snapshot as any)?.meta?.timeframe || ''}</span>
+                      }
+                    />
                   </div>
                 ))}
               </div>

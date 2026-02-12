@@ -4,10 +4,9 @@ import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { fetchJobResult, fetchJobStatus, resetJob, setJobId } from '../store/slices/jobSlice'
 import { fetchParamSchema } from '../store/slices/paramSchemaSlice'
 import { addFavoriteAndPersist, removeFavoriteAndPersist } from '../store/slices/favoritesSlice'
-import BacktestChart from '../components/BacktestChart'
+import ChartPanel from '../components/ChartPanel'
 import Layout from '../components/Layout'
 import Card from '../components/Card'
-import Button from '../components/Button'
 
 function safeString(v: any): string {
   if (v === null || v === undefined) return ''
@@ -38,9 +37,6 @@ export default function JobPage() {
   const favorites = useAppSelector((s) => s.favorites.items)
 
   const [currentSymbol, setCurrentSymbol] = useState<string>('')
-  const [chartMountId, setChartMountId] = useState(0)
-
-  const chartPanelRef = useRef<HTMLDivElement | null>(null)
   const stdoutRef = useRef<HTMLDivElement | null>(null)
   const stderrRef = useRef<HTMLDivElement | null>(null)
 
@@ -69,20 +65,6 @@ export default function JobPage() {
     if (schemaDefs.length) return
     dispatch(fetchParamSchema())
   }, [dispatch, schemaDefs.length])
-
-  useEffect(() => {
-    const onFs = () => {
-      const fs = Boolean(document.fullscreenElement)
-      if (!fs) {
-        // Re-mount chart after exiting fullscreen to avoid stale canvas sizing
-        // that can persist until navigation.
-        setChartMountId((v) => v + 1)
-      }
-    }
-    document.addEventListener('fullscreenchange', onFs)
-    onFs()
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
 
   useEffect(() => {
     if (!jobIdParam) return
@@ -145,19 +127,6 @@ export default function JobPage() {
   const st = status?.status || 'unknown'
   const dotClass = st === 'running' ? 'running' : st === 'failed' ? 'failed' : st === 'finished' ? 'finished' : ''
   const statusText = status?.error ? `${st} (${status.error})` : st
-
-  async function toggleFullscreen() {
-    const el = chartPanelRef.current
-    try {
-      if (!document.fullscreenElement) {
-        if (el && el.requestFullscreen) await el.requestFullscreen()
-      } else {
-        if (document.exitFullscreen) await document.exitFullscreen()
-      }
-    } catch {
-      // ignore
-    }
-  }
 
   function toggleFavorite() {
     if (!jobIdParam) return
@@ -228,21 +197,11 @@ export default function JobPage() {
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
-            <Button
-              type="button"
-              onClick={toggleFullscreen}
-              disabled={!currentSymbol}
-              style={{ marginLeft: 'auto' }}
-            >
-              {'⛶'}
-            </Button>
           </div>
         }
       >
         {error ? <div className="muted"><b>Error:</b> {error}</div> : null}
-        <div ref={chartPanelRef} className="chartPanel" style={{ height: 520 }}>
-          <BacktestChart key={`${currentSymbol}:${chartMountId}`} result={result} symbol={currentSymbol} />
-        </div>
+        <ChartPanel result={result} symbol={currentSymbol} height={520} />
       </Card>
 
       <div style={{ height: 14 }} />
