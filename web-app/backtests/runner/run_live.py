@@ -111,57 +111,86 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
 
 def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
   """
-  Fallback zone calculation if strategy execution fails.
-  This creates meaningful support/resistance levels, not every candle.
+  Fallback zone calculation that mimics the backtest zone format.
+  Creates continuous segments of support/resistance levels like the Zones indicator.
   """
   if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
 
-  resistance_levels = []
-  support_levels = []
-  sr_padding = 0.00001
+  # Calculate support and resistance arrays (mostly NaN with some values)
+  resistance_values = [float('nan')] * len(times_s)
+  support_values = [float('nan')] * len(times_s)
   
-  # Simple lookback-based zones as fallback
   lb = int(lookback or 50)
   if lb <= 1:
     lb = 50
   
-  # Find significant resistance levels (recent highs)
-  for i in range(lb, len(times_s) - lb, lb // 2):  # Sample every half lookback period
+  # Find significant levels and mark them in the arrays
+  for i in range(lb, len(times_s) - lb):
     window_high = max(highs[i - lb : i + 1])
     window_low = min(lows[i - lb : i + 1])
-    
-    # Only add zones if they're significantly different from recent price
     current_price = closes[i]
+    
+    # Mark resistance if it's significant (0.5%+ above current price)
     resistance_distance = abs(window_high - current_price) / current_price
-    support_distance = abs(current_price - window_low) / current_price
-    
-    # Add resistance if it's at least 0.5% away from current price
     if resistance_distance > 0.005:  # 0.5% threshold
-      resistance_levels.append({
-        'startTime': times_s[i - lb],
-        'endTime': times_s[i + lb] if i + lb < len(times_s) else times_s[-1],
-        'value': window_high + sr_padding
-      })
+      resistance_values[i] = window_high
     
-    # Add support if it's at least 0.5% away from current price
+    # Mark support if it's significant (0.5%+ below current price)  
+    support_distance = abs(current_price - window_low) / current_price
     if support_distance > 0.005:  # 0.5% threshold
-      support_levels.append({
-        'startTime': times_s[i - lb],
-        'endTime': times_s[i + lb] if i + lb < len(times_s) else times_s[-1],
-        'value': window_low - sr_padding
-      })
+      support_values[i] = window_low
   
-  print(f"DEBUG Fallback: {symbol} - Generated {len(support_levels)} support, {len(resistance_levels)} resistance zones")
-  if support_levels:
-    print(f"DEBUG Fallback: Sample support: {support_levels[0]}")
-  if resistance_levels:
-    print(f"DEBUG Fallback: Sample resistance: {resistance_levels[0]}")
+  # Convert to segments using the same logic as backtest
+  resistance_segments = _segments_from_constant_levels(times_s, resistance_values)
+  support_segments = _segments_from_constant_levels(times_s, support_values)
+  
+  print(f"DEBUG Fallback: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones")
+  if support_segments:
+    print(f"DEBUG Fallback: Sample support: {support_segments[0]}")
+  if resistance_segments:
+    print(f"DEBUG Fallback: Sample resistance: {resistance_segments[0]}")
   
   return {
-    'resistanceSegments': resistance_levels,
-    'supportSegments': support_levels,
+    'resistanceSegments': resistance_segments,
+    'supportSegments': support_segments,
   }
+
+
+def _segments_from_constant_levels(times_s: list[int], values: list[float]) -> list[dict[str, Any]]:
+  """
+  Convert an array of (mostly-NaN) constant price levels into horizontal segments.
+  Each segment is {startTime, endTime, value}.
+  This is the same logic used in backtest.
+  """
+  segs: list[dict[str, Any]] = []
+  start_idx: int | None = None
+
+  def is_nan(x: float) -> bool:
+    return x is None or (isinstance(x, float) and math.isnan(x))
+
+  for i, v in enumerate(values):
+    if not is_nan(v) and start_idx is None:
+      start_idx = i
+      continue
+
+    if start_idx is not None:
+      is_last = i == len(values) - 1
+      price_changed = (not is_nan(v)) and (v != values[start_idx])
+
+      if is_nan(v) or price_changed or is_last:
+        end_idx = i if (is_last and not is_nan(v) and not price_changed) else i - 1
+        if end_idx >= start_idx:
+          segs.append(
+            {
+              "startTime": times_s[start_idx],
+              "endTime": times_s[end_idx],
+              "value": float(values[start_idx]),
+            }
+          )
+        start_idx = None
+
+  return segs
 
 
 def main() -> int:
