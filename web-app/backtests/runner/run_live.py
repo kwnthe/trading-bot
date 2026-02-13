@@ -150,6 +150,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     # Extract zones from the indicator
     if results and len(results) > 0:
       strategy = results[0]
+      # Get indicators from the strategy
       if hasattr(strategy, '_indicators') and len(strategy._indicators) > 0:
         zones_indicator = strategy._indicators[0]
         
@@ -182,10 +183,54 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
         }
     
   except Exception as e:
-    # Fallback to empty zones if strategy execution fails
-    pass
+    # If strategy execution fails, try to use the simplified zones calculation as fallback
+    print(f"Warning: Strategy zones failed, using fallback: {e}")
+    return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
   
   return {'resistanceSegments': [], 'supportSegments': []}
+
+
+def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
+  """
+  Fallback zone calculation if strategy execution fails.
+  This is a simplified version for backup purposes.
+  """
+  if not times_s or not highs or not lows or not closes:
+    return {'resistanceSegments': [], 'supportSegments': []}
+
+  resistance_levels = []
+  support_levels = []
+  sr_padding = 0.00001
+  
+  # Simple lookback-based zones as fallback
+  lb = int(lookback or 50)
+  if lb <= 1:
+    lb = 50
+  
+  for i in range(len(times_s)):
+    if i < lb:
+      continue
+    
+    # Simple resistance: recent high
+    window_high = max(highs[i - lb : i + 1])
+    window_low = min(lows[i - lb : i + 1])
+    
+    # Add resistance
+    resistance_levels.append({
+      'time': times_s[i], 
+      'value': window_high + sr_padding
+    })
+    
+    # Add support
+    support_levels.append({
+      'time': times_s[i], 
+      'value': window_low - sr_padding
+    })
+  
+  return {
+    'resistanceSegments': resistance_levels,
+    'supportSegments': support_levels,
+  }
 
 
 def main() -> int:
