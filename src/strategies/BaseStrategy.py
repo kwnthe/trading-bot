@@ -9,7 +9,7 @@ from indicators import BreakoutIndicator
 from indicators import BreakRetestIndicator
 from models.candlestick import Candlestick
 from src.models.chart_markers import ChartDataType, ChartData, ChartDataPoint, ChartMarkerType
-from src.models.order import OrderType, TradeState
+from src.models.order import OrderType, OrderSide, TradeState
 from utils.config import Config
 from utils.strategy_utils.general_utils import convert_pips_to_price
 from infrastructure import StrategyLogger, RepositoryType, LogLevel, RepositoryName
