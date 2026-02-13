@@ -134,15 +134,17 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
     window_high = max(highs[i - lb : i + 1])
     window_low = min(lows[i - lb : i + 1])
     
-    # Add resistance
+    # Add resistance with startTime/endTime format for frontend compatibility
     resistance_levels.append({
-      'time': times_s[i], 
+      'startTime': times_s[i - lb],  # Start of the lookback period
+      'endTime': times_s[i],         # Current time
       'value': window_high + sr_padding
     })
     
-    # Add support
+    # Add support with startTime/endTime format for frontend compatibility
     support_levels.append({
-      'time': times_s[i], 
+      'startTime': times_s[i - lb],  # Start of the lookback period
+      'endTime': times_s[i],         # Current time
       'value': window_low - sr_padding
     })
   
@@ -344,6 +346,12 @@ def main() -> int:
         print(f"DEBUG Final: {sym} - Chart data resistance points: {len(chart_data['resistance']['points'])}")
         print(f"DEBUG Final: {sym} - Legacy zones support: {len(zones['supportSegments'])}")
         print(f"DEBUG Final: {sym} - Legacy zones resistance: {len(zones['resistanceSegments'])}")
+        
+        # Debug: Show sample zone data format
+        if zones['supportSegments']:
+            print(f"DEBUG Final: Sample support zone format: {zones['supportSegments'][0]}")
+        if zones['resistanceSegments']:
+            print(f"DEBUG Final: Sample resistance zone format: {zones['resistanceSegments'][0]}")
 
       latest_seq += 1
       snapshot = {
