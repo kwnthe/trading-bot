@@ -102,92 +102,11 @@ def _compute_ema(times_s: list[int], closes: list[float], ema_len: int) -> list[
 def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
   """
   Get zones from strategy indicators for consistency with backtesting.
-  This runs the actual Zones indicator to get support/resistance levels.
+  For now, use fallback zones to ensure zones are displayed.
+  TODO: Fix strategy zones import issues.
   """
-  if not times_s or not highs or not lows or not closes:
-    return {'resistanceSegments': [], 'supportSegments': []}
-
-  try:
-    # Add project root to path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-    
-    import backtrader as bt
-    import pandas as pd
-    from src.indicators.Zones import Zones
-    
-    # Create backtrader data feed
-    class ArrayData(bt.feeds.PandasData):
-      params = (
-        ('datetime', None),
-        ('open', -1),
-        ('high', -1),
-        ('low', -1),
-        ('close', -1),
-        ('volume', -1),
-        ('openinterest', -1),
-      )
-
-    df = pd.DataFrame({
-      'datetime': pd.to_datetime(times_s, unit='s'),
-      'high': highs,
-      'low': lows,
-      'close': closes,
-      'open': closes,  # Use close as open since we don't have open prices
-      'volume': [1] * len(times_s),  # Dummy volume
-    })
-    
-    # Create minimal cerebro setup
-    cerebro = bt.Cerebro()
-    data = ArrayData(dataname=df)
-    cerebro.adddata(data)
-    
-    # Add the Zones indicator
-    cerebro.addindicator(Zones, symbol=symbol)
-    
-    # Run to calculate indicators
-    results = cerebro.run(runonce=True)
-    
-    # Extract zones from the indicator
-    if results and len(results) > 0:
-      strategy = results[0]
-      # Get indicators from the strategy
-      if hasattr(strategy, '_indicators') and len(strategy._indicators) > 0:
-        zones_indicator = strategy._indicators[0]
-        
-        # Extract support and resistance levels
-        support_segments = []
-        resistance_segments = []
-        
-        for i in range(len(times_s)):
-          # Support
-          if i < len(zones_indicator.lines.support1):
-            sup_val = zones_indicator.lines.support1[i]
-            if not math.isnan(sup_val):
-              support_segments.append({
-                'time': times_s[i], 
-                'value': float(sup_val)
-              })
-          
-          # Resistance
-          if i < len(zones_indicator.lines.resistance1):
-            res_val = zones_indicator.lines.resistance1[i]
-            if not math.isnan(res_val):
-              resistance_segments.append({
-                'time': times_s[i], 
-                'value': float(res_val)
-              })
-        
-        return {
-          'resistanceSegments': resistance_segments,
-          'supportSegments': support_segments,
-        }
-    
-  except Exception as e:
-    # If strategy execution fails, try to use the simplified zones calculation as fallback
-    print(f"Warning: Strategy zones failed, using fallback: {e}")
-    return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
-  
-  return {'resistanceSegments': [], 'supportSegments': []}
+  # For now, just use the fallback zones which should work
+  return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
 
 
 def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
