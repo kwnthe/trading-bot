@@ -111,39 +111,74 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
 
 def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
   """
-  Fallback zone calculation that mimics the backtest zone format.
-  Creates continuous segments of support/resistance levels like the Zones indicator.
+  Fallback zone calculation that creates continuous zones like the backtest.
+  Simple approach: find major swing highs/lows and create horizontal lines.
   """
   if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
 
-  # Calculate support and resistance arrays (mostly NaN with some values)
-  resistance_values = [float('nan')] * len(times_s)
-  support_values = [float('nan')] * len(times_s)
+  resistance_segments = []
+  support_segments = []
   
   lb = int(lookback or 50)
   if lb <= 1:
     lb = 50
   
-  # Find significant levels and mark them in the arrays
+  # Find swing highs (resistance) and swing lows (support)
   for i in range(lb, len(times_s) - lb):
-    window_high = max(highs[i - lb : i + 1])
-    window_low = min(lows[i - lb : i + 1])
-    current_price = closes[i]
+    # Check if this is a swing high (resistance)
+    is_swing_high = True
+    for j in range(i - lb, i + lb + 1):
+      if highs[j] > highs[i]:
+        is_swing_high = False
+        break
     
-    # Mark resistance if it's significant (0.5%+ above current price)
-    resistance_distance = abs(window_high - current_price) / current_price
-    if resistance_distance > 0.005:  # 0.5% threshold
-      resistance_values[i] = window_high
+    if is_swing_high:
+      # Create a resistance segment that extends forward until broken
+      resistance_value = highs[i]
+      end_time = times_s[i]
+      
+      # Find when this resistance is broken
+      for j in range(i + 1, min(i + lb * 2, len(times_s))):
+        if highs[j] > resistance_value * 1.001:  # 0.1% break threshold
+          end_time = times_s[j]
+          break
+        end_time = times_s[j]
+      
+      resistance_segments.append({
+        'startTime': times_s[i],
+        'endTime': end_time,
+        'value': resistance_value
+      })
     
-    # Mark support if it's significant (0.5%+ below current price)  
-    support_distance = abs(current_price - window_low) / current_price
-    if support_distance > 0.005:  # 0.5% threshold
-      support_values[i] = window_low
+    # Check if this is a swing low (support)
+    is_swing_low = True
+    for j in range(i - lb, i + lb + 1):
+      if lows[j] < lows[i]:
+        is_swing_low = False
+        break
+    
+    if is_swing_low:
+      # Create a support segment that extends forward until broken
+      support_value = lows[i]
+      end_time = times_s[i]
+      
+      # Find when this support is broken
+      for j in range(i + 1, min(i + lb * 2, len(times_s))):
+        if lows[j] < support_value * 0.999:  # 0.1% break threshold
+          end_time = times_s[j]
+          break
+        end_time = times_s[j]
+      
+      support_segments.append({
+        'startTime': times_s[i],
+        'endTime': end_time,
+        'value': support_value
+      })
   
-  # Convert to segments using the same logic as backtest
-  resistance_segments = _segments_from_constant_levels(times_s, resistance_values)
-  support_segments = _segments_from_constant_levels(times_s, support_values)
+  # Filter out very short segments (less than 5 candles)
+  resistance_segments = [seg for seg in resistance_segments if seg['endTime'] - seg['startTime'] > (times_s[1] - times_s[0]) * 5]
+  support_segments = [seg for seg in support_segments if seg['endTime'] - seg['startTime'] > (times_s[1] - times_s[0]) * 5]
   
   print(f"DEBUG Fallback: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones")
   if support_segments:
