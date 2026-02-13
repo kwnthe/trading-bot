@@ -146,6 +146,12 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
       'value': window_low - sr_padding
     })
   
+  print(f"DEBUG Fallback: {symbol} - Generated {len(support_levels)} support, {len(resistance_levels)} resistance zones")
+  if support_levels:
+    print(f"DEBUG Fallback: Sample support: {support_levels[0]}")
+  if resistance_levels:
+    print(f"DEBUG Fallback: Sample resistance: {resistance_levels[0]}")
+  
   return {
     'resistanceSegments': resistance_levels,
     'supportSegments': support_levels,
@@ -333,6 +339,11 @@ def main() -> int:
           'markers': [],  # Keep for backward compatibility
           'orderBoxes': [],
         }
+        
+        print(f"DEBUG Final: {sym} - Chart data support points: {len(chart_data['support']['points'])}")
+        print(f"DEBUG Final: {sym} - Chart data resistance points: {len(chart_data['resistance']['points'])}")
+        print(f"DEBUG Final: {sym} - Legacy zones support: {len(zones['supportSegments'])}")
+        print(f"DEBUG Final: {sym} - Legacy zones resistance: {len(zones['resistanceSegments'])}")
 
       latest_seq += 1
       snapshot = {
