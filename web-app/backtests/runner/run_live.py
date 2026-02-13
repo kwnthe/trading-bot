@@ -180,6 +180,10 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
           else:
             resistance_values.append(float('nan'))
         
+        # Debug: Print some raw values to understand what's happening
+        print(f"DEBUG Strategy: {symbol} - First 10 support values: {[round(v, 5) if not math.isnan(v) else 'NaN' for v in support_values[:10]]}")
+        print(f"DEBUG Strategy: {symbol} - First 10 resistance values: {[round(v, 5) if not math.isnan(v) else 'NaN' for v in resistance_values[:10]]}")
+        
         # Convert to segments using the same logic as backtest
         resistance_segments = _segments_from_constant_levels(times_s, resistance_values)
         support_segments = _segments_from_constant_levels(times_s, support_values)
