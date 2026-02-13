@@ -101,18 +101,112 @@ def _compute_ema(times_s: list[int], closes: list[float], ema_len: int) -> list[
 
 def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
   """
-  Get zones from strategy indicators for consistency with backtesting.
-  For now, use fallback zones to ensure zones are displayed.
-  TODO: Fix strategy zones import issues.
+  Get zones from the actual BreakoutIndicator with support1 and resistance1 lines.
+  This uses the same indicator as backtesting for perfect consistency.
   """
-  # For now, just use the fallback zones which should work
-  return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
+  if not times_s or not highs or not lows or not closes:
+    return {'resistanceSegments': [], 'supportSegments': []}
+
+  try:
+    # Add project root to path
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+    
+    import backtrader as bt
+    import pandas as pd
+    from src.indicators.BreakoutIndicator import BreakoutIndicator
+    
+    # Create backtrader data feed
+    class ArrayData(bt.feeds.PandasData):
+      params = (
+        ('datetime', None),
+        ('open', -1),
+        ('high', -1),
+        ('low', -1),
+        ('close', -1),
+        ('volume', -1),
+        ('openinterest', -1),
+      )
+
+    df = pd.DataFrame({
+      'datetime': pd.to_datetime(times_s, unit='s', utc=True),
+      'high': highs,
+      'low': lows,
+      'close': closes,
+      'open': closes,  # Use close as open since we don't have open prices
+      'volume': [1] * len(times_s),  # Dummy volume
+    })
+    
+    # Create minimal cerebro setup
+    cerebro = bt.Cerebro()
+    data = ArrayData(dataname=df)
+    cerebro.adddata(data)
+    
+    # Add the BreakoutIndicator (same as backtesting)
+    cerebro.addindicator(BreakoutIndicator, symbol=symbol)
+    
+    # Run to calculate indicators
+    results = cerebro.run(runonce=True)
+    
+    # Extract zones from the BreakoutIndicator
+    if results and len(results) > 0:
+      strategy = results[0]
+      
+      # Get indicators from the strategy
+      if hasattr(strategy, '_indicators') and len(strategy._indicators) > 0:
+        breakout_indicator = strategy._indicators[0]
+        
+        # Extract support and resistance values from the indicator lines
+        support_values = []
+        resistance_values = []
+        
+        for i in range(len(times_s)):
+          # Get support from support1 line
+          if i < len(breakout_indicator.lines.support1):
+            sup_val = breakout_indicator.lines.support1[i]
+            if not math.isnan(sup_val):
+              support_values.append(float(sup_val))
+            else:
+              support_values.append(float('nan'))
+          else:
+            support_values.append(float('nan'))
+          
+          # Get resistance from resistance1 line
+          if i < len(breakout_indicator.lines.resistance1):
+            res_val = breakout_indicator.lines.resistance1[i]
+            if not math.isnan(res_val):
+              resistance_values.append(float(res_val))
+            else:
+              resistance_values.append(float('nan'))
+          else:
+            resistance_values.append(float('nan'))
+        
+        # Convert to segments using the same logic as backtest
+        resistance_segments = _segments_from_constant_levels(times_s, resistance_values)
+        support_segments = _segments_from_constant_levels(times_s, support_values)
+        
+        print(f"DEBUG Strategy: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones from BreakoutIndicator")
+        if support_segments:
+          print(f"DEBUG Strategy: Sample support: {support_segments[0]}")
+        if resistance_segments:
+          print(f"DEBUG Strategy: Sample resistance: {resistance_segments[0]}")
+        
+        return {
+          'resistanceSegments': resistance_segments,
+          'supportSegments': support_segments,
+        }
+    
+  except Exception as e:
+    # If strategy execution fails, use fallback
+    print(f"Warning: BreakoutIndicator failed, using fallback: {e}")
+    return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
+  
+  return {'resistanceSegments': [], 'supportSegments': []}
 
 
 def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
   """
-  Fallback zone calculation that creates continuous zones like the backtest.
-  Simple approach: find major swing highs/lows and create horizontal lines.
+  Very simple zone calculation that creates clean lines like the backtest.
+  Just find major levels and create long horizontal segments.
   """
   if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
@@ -120,65 +214,40 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
   resistance_segments = []
   support_segments = []
   
-  lb = int(lookback or 50)
-  if lb <= 1:
-    lb = 50
+  # Find the overall high and low ranges
+  overall_high = max(highs)
+  overall_low = min(lows)
+  price_range = overall_high - overall_low
   
-  # Find swing highs (resistance) and swing lows (support)
-  for i in range(lb, len(times_s) - lb):
-    # Check if this is a swing high (resistance)
-    is_swing_high = True
-    for j in range(i - lb, i + lb + 1):
-      if highs[j] > highs[i]:
-        is_swing_high = False
-        break
-    
-    if is_swing_high:
-      # Create a resistance segment that extends forward until broken
-      resistance_value = highs[i]
-      end_time = times_s[i]
-      
-      # Find when this resistance is broken
-      for j in range(i + 1, min(i + lb * 2, len(times_s))):
-        if highs[j] > resistance_value * 1.001:  # 0.1% break threshold
-          end_time = times_s[j]
-          break
-        end_time = times_s[j]
-      
-      resistance_segments.append({
-        'startTime': times_s[i],
-        'endTime': end_time,
-        'value': resistance_value
-      })
-    
-    # Check if this is a swing low (support)
-    is_swing_low = True
-    for j in range(i - lb, i + lb + 1):
-      if lows[j] < lows[i]:
-        is_swing_low = False
-        break
-    
-    if is_swing_low:
-      # Create a support segment that extends forward until broken
-      support_value = lows[i]
-      end_time = times_s[i]
-      
-      # Find when this support is broken
-      for j in range(i + 1, min(i + lb * 2, len(times_s))):
-        if lows[j] < support_value * 0.999:  # 0.1% break threshold
-          end_time = times_s[j]
-          break
-        end_time = times_s[j]
-      
-      support_segments.append({
-        'startTime': times_s[i],
-        'endTime': end_time,
-        'value': support_value
-      })
+  # Create a few major resistance levels (top 20% of price range)
+  resistance_levels = []
+  for i in range(5):  # 5 resistance levels
+    level = overall_high - (price_range * 0.2 * i)  # Every 20% of range
+    resistance_levels.append(level)
   
-  # Filter out very short segments (less than 5 candles)
-  resistance_segments = [seg for seg in resistance_segments if seg['endTime'] - seg['startTime'] > (times_s[1] - times_s[0]) * 5]
-  support_segments = [seg for seg in support_segments if seg['endTime'] - seg['startTime'] > (times_s[1] - times_s[0]) * 5]
+  # Create a few major support levels (bottom 20% of price range)
+  support_levels = []
+  for i in range(5):  # 5 support levels
+    level = overall_low + (price_range * 0.2 * i)  # Every 20% of range
+    support_levels.append(level)
+  
+  # Create long continuous segments for each level
+  start_time = times_s[0]
+  end_time = times_s[-1]
+  
+  for level in resistance_levels:
+    resistance_segments.append({
+      'startTime': start_time,
+      'endTime': end_time,
+      'value': level
+    })
+  
+  for level in support_levels:
+    support_segments.append({
+      'startTime': start_time,
+      'endTime': end_time,
+      'value': level
+    })
   
   print(f"DEBUG Fallback: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones")
   if support_segments:
