@@ -112,7 +112,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
 def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
   """
   Fallback zone calculation if strategy execution fails.
-  This is a simplified version for backup purposes.
+  This creates meaningful support/resistance levels, not every candle.
   """
   if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
@@ -126,27 +126,31 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
   if lb <= 1:
     lb = 50
   
-  for i in range(len(times_s)):
-    if i < lb:
-      continue
-    
-    # Simple resistance: recent high
+  # Find significant resistance levels (recent highs)
+  for i in range(lb, len(times_s) - lb, lb // 2):  # Sample every half lookback period
     window_high = max(highs[i - lb : i + 1])
     window_low = min(lows[i - lb : i + 1])
     
-    # Add resistance with startTime/endTime format for frontend compatibility
-    resistance_levels.append({
-      'startTime': times_s[i - lb],  # Start of the lookback period
-      'endTime': times_s[i],         # Current time
-      'value': window_high + sr_padding
-    })
+    # Only add zones if they're significantly different from recent price
+    current_price = closes[i]
+    resistance_distance = abs(window_high - current_price) / current_price
+    support_distance = abs(current_price - window_low) / current_price
     
-    # Add support with startTime/endTime format for frontend compatibility
-    support_levels.append({
-      'startTime': times_s[i - lb],  # Start of the lookback period
-      'endTime': times_s[i],         # Current time
-      'value': window_low - sr_padding
-    })
+    # Add resistance if it's at least 0.5% away from current price
+    if resistance_distance > 0.005:  # 0.5% threshold
+      resistance_levels.append({
+        'startTime': times_s[i - lb],
+        'endTime': times_s[i + lb] if i + lb < len(times_s) else times_s[-1],
+        'value': window_high + sr_padding
+      })
+    
+    # Add support if it's at least 0.5% away from current price
+    if support_distance > 0.005:  # 0.5% threshold
+      support_levels.append({
+        'startTime': times_s[i - lb],
+        'endTime': times_s[i + lb] if i + lb < len(times_s) else times_s[-1],
+        'value': window_low - sr_padding
+      })
   
   print(f"DEBUG Fallback: {symbol} - Generated {len(support_levels)} support, {len(resistance_levels)} resistance zones")
   if support_levels:
