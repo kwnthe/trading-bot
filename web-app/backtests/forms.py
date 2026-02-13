@@ -40,7 +40,7 @@ def _field_from_def(d: ParamDef) -> forms.Field:
         return forms.DateTimeField(
             **common,
             required=d.required,
-            input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S"],
+            input_formats=["%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"],
             widget=forms.DateTimeInput(format="%Y-%m-%dT%H:%M", attrs={"type": "datetime-local"}),
         )
 
