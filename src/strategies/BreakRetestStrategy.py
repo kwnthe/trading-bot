@@ -11,7 +11,7 @@ from infrastructure import LogLevel, RepositoryName
 from src.utils.environment_variables import EnvironmentVariables
 from src.utils.trade_confirmations import RSIConfirmations
 import uuid
-from src.models.chart_markers import ChartMarkerType
+from src.models.chart_markers import ChartDataType, ChartMarkerType
 
 # Ensure project root on path for ml package
 _root = Path(__file__).resolve().parent.parent.parent
@@ -93,9 +93,17 @@ class BreakRetestStrategy(BaseStrategy):
                 #         take_trade = self.ai_filter.predict(features) >= getattr(self.ai_filter, 'best_threshold', 0.5)
                 if take_trade:
                     self.place_retest_order_for_data(i)
-                    self.set_chart_marker(self.candle_index, current_price, data_feed_index=i, marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
+                    self.set_chart_data(ChartDataType.MARKER, 
+                                      data_feed_index=i,
+                                      candle_index=self.candle_index, 
+                                      price=current_price, 
+                                      marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
             self.invalidate_pending_trades_if_sr_changed_or_completed(i)  
             self.process_pending_trade_updates(i)
+            
+            # Sync current indicator data to chart for live trading visualization
+            if not self._is_backtesting():
+                self.sync_indicator_data_to_chart(i)
 
     def process_pending_trade_updates(self, data_index):
         # Update atr_rel_excursion on pending orders for this pair

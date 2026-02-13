@@ -1,5 +1,6 @@
 import backtrader as bt
 import csv
+import math
 import os
 import sys
 from datetime import datetime
@@ -7,7 +8,8 @@ from pathlib import Path
 from indicators import BreakoutIndicator
 from indicators import BreakRetestIndicator
 from models.candlestick import Candlestick
-from src.models.order import OrderSide, OrderType, TradeState
+from src.models.chart_markers import ChartDataType, ChartData, ChartDataPoint, ChartMarkerType
+from src.models.order import OrderType, TradeState
 from utils.config import Config
 from utils.strategy_utils.general_utils import convert_pips_to_price
 from infrastructure import StrategyLogger, RepositoryType, LogLevel, RepositoryName
@@ -904,6 +906,214 @@ class BaseStrategy(bt.Strategy):
         if data_feed_index in chart_markers and candle_index in chart_markers[data_feed_index]:
             return chart_markers[data_feed_index][candle_index]
         return default
+    
+    def set_chart_data(self, data_type: ChartDataType, data_feed_index: int = 0, **kwargs):
+        """
+        Set chart data of a specific type. This is the new flexible method for sending
+        data from strategies to charts, supporting various data types (markers, lines, zones).
+        
+        Args:
+            data_type: Type of chart data (ChartDataType.MARKER, SUPPORT, RESISTANCE, EMA, ZONE)
+            data_feed_index: Index of the data feed (0 for first symbol, 1 for second, etc.)
+            **kwargs: Additional data based on type:
+                - For MARKER: candle_index, price, marker_type
+                - For SUPPORT/RESISTANCE: points (list of {time, value} dicts)
+                - For EMA: points (list of {time, value} dicts)
+                - For ZONE: points (list of {time, value} dicts)
+        
+        Example:
+            # Set a retest order marker (replaces set_chart_marker)
+            self.set_chart_data(ChartDataType.MARKER, 
+                              candle_index=self.candle_index, 
+                              price=current_price, 
+                              marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
+            
+            # Set support levels
+            self.set_chart_data(ChartDataType.SUPPORT,
+                              points=[{'time': 1234567890, 'value': 1.2500}])
+            
+            # Set EMA data
+            self.set_chart_data(ChartDataType.EMA,
+                              points=[{'time': t, 'value': v} for t, v in zip(times, ema_values)])
+        """
+        cerebro = self._get_cerebro()
+        
+        # Initialize chart_data structure if needed
+        if cerebro is not None:
+            if not hasattr(cerebro, 'chart_data'):
+                cerebro.chart_data = {}
+            if data_feed_index not in cerebro.chart_data:
+                cerebro.chart_data[data_feed_index] = {}
+        else:
+            # Fallback to broker if cerebro not available
+            if not hasattr(self.broker, 'chart_data'):
+                self.broker.chart_data = {}
+            if data_feed_index not in self.broker.chart_data:
+                self.broker.chart_data[data_feed_index] = {}
+        
+        # Get the chart data container
+        chart_data = cerebro.chart_data if cerebro is not None else self.broker.chart_data
+        
+        # Create or get the data container for this type
+        if data_type.value not in chart_data[data_feed_index]:
+            chart_data[data_feed_index][data_type.value] = ChartData(data_type, **kwargs)
+        
+        data_container = chart_data[data_feed_index][data_type.value]
+        
+        # Handle different data types
+        if data_type == ChartDataType.MARKER:
+            # Handle marker data (backward compatibility with set_chart_marker)
+            candle_index = kwargs.get('candle_index')
+            price = kwargs.get('price')
+            marker_type = kwargs.get('marker_type', 'diamond')
+            
+            if candle_index is not None and price is not None:
+                # Convert time from candle index to actual timestamp if available
+                time_value = self._get_time_for_candle_index(candle_index, data_feed_index)
+                data_container.add_point_at_time(
+                    time=time_value,
+                    value=price,
+                    marker_type=marker_type,
+                    candle_index=candle_index
+                )
+                
+                # Also store in old chart_markers for backward compatibility
+                self.set_chart_marker(candle_index, price, data_feed_index, marker_type)
+        
+        elif data_type in [ChartDataType.SUPPORT, ChartDataType.RESISTANCE, ChartDataType.EMA]:
+            # Handle line/zone data
+            points = kwargs.get('points', [])
+            for point in points:
+                if isinstance(point, dict) and 'time' in point and 'value' in point:
+                    data_container.add_point_at_time(
+                        time=point['time'],
+                        value=point['value'],
+                        **{k: v for k, v in point.items() if k not in ['time', 'value']}
+                    )
+    
+    def _get_time_for_candle_index(self, candle_index: int, data_feed_index: int = 0) -> int:
+        """
+        Get the timestamp for a given candle index.
+        This is a helper method for converting candle indices to timestamps.
+        """
+        try:
+            data_indicators = self._get_data_indicators()
+            if data_feed_index in data_indicators:
+                data = data_indicators[data_feed_index]['data']
+                if hasattr(data, 'datetime') and len(data.datetime) > candle_index:
+                    return int(data.datetime[candle_index].timestamp())
+        except (AttributeError, IndexError, ValueError):
+            pass
+        
+        # Fallback: return candle_index as time (not ideal but prevents crashes)
+        return candle_index
+    
+    def get_chart_data(self, data_type: ChartDataType, data_feed_index: int = 0) -> ChartData:
+        """
+        Get chart data for a specific type.
+        
+        Args:
+            data_type: Type of chart data to retrieve
+            data_feed_index: Index of the data feed
+        
+        Returns:
+            ChartData object or empty ChartData if not found
+        """
+        cerebro = self._get_cerebro()
+        chart_data = cerebro.chart_data if cerebro is not None else getattr(self.broker, 'chart_data', {})
+        
+        if (data_feed_index in chart_data and 
+            data_type.value in chart_data[data_feed_index]):
+            return chart_data[data_feed_index][data_type.value]
+        
+        # Return empty ChartData if not found
+        return ChartData(data_type)
+    
+    def set_support_data(self, support_points: list, data_feed_index: int = 0, **kwargs):
+        """
+        Convenience method to set support level data.
+        
+        Args:
+            support_points: List of support points [{'time': timestamp, 'value': price}, ...]
+            data_feed_index: Index of the data feed
+            **kwargs: Additional metadata
+        """
+        self.set_chart_data(ChartDataType.SUPPORT, data_feed_index, points=support_points, **kwargs)
+    
+    def set_resistance_data(self, resistance_points: list, data_feed_index: int = 0, **kwargs):
+        """
+        Convenience method to set resistance level data.
+        
+        Args:
+            resistance_points: List of resistance points [{'time': timestamp, 'value': price}, ...]
+            data_feed_index: Index of the data feed
+            **kwargs: Additional metadata
+        """
+        self.set_chart_data(ChartDataType.RESISTANCE, data_feed_index, points=resistance_points, **kwargs)
+    
+    def set_ema_data(self, ema_points: list, data_feed_index: int = 0, **kwargs):
+        """
+        Convenience method to set EMA line data.
+        
+        Args:
+            ema_points: List of EMA points [{'time': timestamp, 'value': ema_value}, ...]
+            data_feed_index: Index of the data feed
+            **kwargs: Additional metadata (e.g., period)
+        """
+        self.set_chart_data(ChartDataType.EMA, data_feed_index, points=ema_points, **kwargs)
+    
+    def sync_indicator_data_to_chart(self, data_feed_index: int = 0):
+        """
+        Automatically send current indicator data (support, resistance, EMA) to chart.
+        This method should be called to keep charts in sync with current indicator values.
+        
+        Args:
+            data_feed_index: Index of the data feed to sync
+        """
+        try:
+            data_indicators = self._get_data_indicators()
+            if data_feed_index not in data_indicators:
+                return
+            
+            indicators = data_indicators[data_feed_index]
+            data = indicators['data']
+            
+            # Get current time
+            current_time = self._get_time_for_candle_index(self.candle_index, data_feed_index)
+            
+            # Send support and resistance from breakout indicator
+            if 'breakout' in indicators:
+                breakout = indicators['breakout']
+                support_value = breakout.lines.support1[0] if len(breakout.lines.support1) > 0 else None
+                resistance_value = breakout.lines.resistance1[0] if len(breakout.lines.resistance1) > 0 else None
+                
+                if support_value is not None and not math.isnan(support_value):
+                    self.set_support_data(
+                        support_points=[{'time': current_time, 'value': float(support_value)}],
+                        data_feed_index=data_feed_index
+                    )
+                
+                if resistance_value is not None and not math.isnan(resistance_value):
+                    self.set_resistance_data(
+                        resistance_points=[{'time': current_time, 'value': float(resistance_value)}],
+                        data_feed_index=data_feed_index
+                    )
+            
+            # Send EMA data
+            if 'ema' in indicators:
+                ema = indicators['ema']
+                ema_value = ema[0] if len(ema) > 0 else None
+                
+                if ema_value is not None and not math.isnan(ema_value):
+                    self.set_ema_data(
+                        ema_points=[{'time': current_time, 'value': float(ema_value)}],
+                        data_feed_index=data_feed_index,
+                        period=getattr(ema, 'params', {}).get('period', 0)
+                    )
+                    
+        except Exception as e:
+            # Don't let chart data sync errors break the strategy
+            pass
     
     def update_open_positions_summary(self):
         # Access data_indicators from cerebro (persists across strategy re-instantiation)

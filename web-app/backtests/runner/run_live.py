@@ -82,11 +82,12 @@ def _segments_from_constant_levels(times_s: list[int], values: list[float]) -> l
 
 
 def _compute_ema(times_s: list[int], closes: list[float], ema_len: int) -> list[dict[str, Any]]:
-  if not ema_len or ema_len <= 0 or not closes:
+  """Compute EMA values for the given price data."""
+  if not times_s or not closes:
     return []
+
   try:
     import pandas as pd
-
     ema_vals = pd.Series(closes, dtype='float64').ewm(span=int(ema_len), adjust=False).mean().to_list()
     out: list[dict[str, Any]] = []
     for i, val in enumerate(ema_vals):
@@ -98,37 +99,93 @@ def _compute_ema(times_s: list[int], closes: list[float], ema_len: int) -> list[
     return []
 
 
-def _compute_zones(times_s: list[int], highs: list[float], lows: list[float], lookback: int) -> dict[str, Any]:
-  if not times_s or not highs or not lows:
+def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
+  """
+  Get zones from strategy indicators for consistency with backtesting.
+  This runs the actual Zones indicator to get support/resistance levels.
+  """
+  if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
 
-  lb = int(lookback or 0)
-  if lb <= 1:
-    lb = 50
+  try:
+    # Add project root to path
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+    
+    import backtrader as bt
+    import pandas as pd
+    from src.indicators.Zones import Zones
+    
+    # Create backtrader data feed
+    class ArrayData(bt.feeds.PandasData):
+      params = (
+        ('datetime', None),
+        ('open', -1),
+        ('high', -1),
+        ('low', -1),
+        ('close', -1),
+        ('volume', -1),
+        ('openinterest', -1),
+      )
 
-  res_levels: list[float] = [float('nan')] * len(times_s)
-  sup_levels: list[float] = [float('nan')] * len(times_s)
-
-  last_res: float | None = None
-  last_sup: float | None = None
-  for i in range(len(times_s)):
-    if i < lb:
-      continue
-    window_high = max(highs[i - lb : i + 1])
-    window_low = min(lows[i - lb : i + 1])
-
-    if last_res is None or window_high != last_res:
-      last_res = float(window_high)
-    if last_sup is None or window_low != last_sup:
-      last_sup = float(window_low)
-
-    res_levels[i] = last_res
-    sup_levels[i] = last_sup
-
-  return {
-    'resistanceSegments': _segments_from_constant_levels(times_s, res_levels),
-    'supportSegments': _segments_from_constant_levels(times_s, sup_levels),
-  }
+    df = pd.DataFrame({
+      'datetime': pd.to_datetime(times_s, unit='s'),
+      'high': highs,
+      'low': lows,
+      'close': closes,
+      'open': closes,  # Use close as open since we don't have open prices
+      'volume': [1] * len(times_s),  # Dummy volume
+    })
+    
+    # Create minimal cerebro setup
+    cerebro = bt.Cerebro()
+    data = ArrayData(dataname=df)
+    cerebro.adddata(data)
+    
+    # Add the Zones indicator
+    cerebro.addindicator(Zones, symbol=symbol)
+    
+    # Run to calculate indicators
+    results = cerebro.run(runonce=True)
+    
+    # Extract zones from the indicator
+    if results and len(results) > 0:
+      strategy = results[0]
+      if hasattr(strategy, '_indicators') and len(strategy._indicators) > 0:
+        zones_indicator = strategy._indicators[0]
+        
+        # Extract support and resistance levels
+        support_segments = []
+        resistance_segments = []
+        
+        for i in range(len(times_s)):
+          # Support
+          if i < len(zones_indicator.lines.support1):
+            sup_val = zones_indicator.lines.support1[i]
+            if not math.isnan(sup_val):
+              support_segments.append({
+                'time': times_s[i], 
+                'value': float(sup_val)
+              })
+          
+          # Resistance
+          if i < len(zones_indicator.lines.resistance1):
+            res_val = zones_indicator.lines.resistance1[i]
+            if not math.isnan(res_val):
+              resistance_segments.append({
+                'time': times_s[i], 
+                'value': float(res_val)
+              })
+        
+        return {
+          'resistanceSegments': resistance_segments,
+          'supportSegments': support_segments,
+        }
+    
+  except Exception as e:
+    # Fallback to empty zones if strategy execution fails
+    pass
+  
+  return {'resistanceSegments': [], 'supportSegments': []}
 
 
 def main() -> int:
@@ -276,12 +333,40 @@ def main() -> int:
             closes.append(c)
 
         ema = _compute_ema(times_s, closes, ema_len)
-        zones = _compute_zones(times_s, highs, lows, default_lookback)
+        
+        # Get zones from strategy indicators for consistency
+        zones = _get_zones_from_strategy(times_s, highs, lows, closes, sym, default_lookback)
+        
+        # Convert to new chart data format for consistency with backtesting
+        chart_data = {
+            'ema': {
+                'data_type': 'ema',
+                'metadata': {'period': ema_len},
+                'points': ema
+            },
+            'support': {
+                'data_type': 'support', 
+                'metadata': {},
+                'points': zones.get('supportSegments', [])
+            },
+            'resistance': {
+                'data_type': 'resistance',
+                'metadata': {},
+                'points': zones.get('resistanceSegments', [])
+            },
+            'markers': {
+                'data_type': 'marker',
+                'metadata': {},
+                'points': []  # Will be populated by live trading events
+            }
+        }
+        
         out_symbols[sym] = {
           'candles': candles,
-          'ema': ema,
-          'zones': zones,
-          'markers': [],
+          'ema': ema,  # Keep for backward compatibility
+          'zones': zones,  # Keep for backward compatibility
+          'chart_data': chart_data,  # New structured format
+          'markers': [],  # Keep for backward compatibility
           'orderBoxes': [],
         }
 
