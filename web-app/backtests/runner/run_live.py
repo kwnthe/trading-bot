@@ -166,7 +166,18 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     try:
         if hasattr(cerebro, 'indicators') and len(cerebro.indicators) > 0:
             print(f"DEBUG Strategy: {symbol} - Using cerebro.indicators")
-            breakout = cerebro.indicators[0]
+            indicator_tuple = cerebro.indicators[0]
+            print(f"DEBUG Strategy: {symbol} - indicator tuple: {indicator_tuple}")
+            print(f"DEBUG Strategy: {symbol} - indicator tuple type: {type(indicator_tuple)}")
+            print(f"DEBUG Strategy: {symbol} - indicator tuple length: {len(indicator_tuple)}")
+            
+            # cerebro.indicators returns (indicator, lines) tuple
+            if isinstance(indicator_tuple, tuple) and len(indicator_tuple) > 0:
+                breakout = indicator_tuple[0]  # Get the actual indicator
+                print(f"DEBUG Strategy: {symbol} - actual indicator type: {type(breakout)}")
+            else:
+                breakout = indicator_tuple
+                
             if hasattr(breakout, 'lines') and hasattr(breakout.lines, 'resistance1') and hasattr(breakout.lines, 'support1'):
                 import numpy as np
                 res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
