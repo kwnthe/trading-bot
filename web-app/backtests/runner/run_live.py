@@ -115,18 +115,6 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     import pandas as pd
     from src.indicators.BreakoutIndicator import BreakoutIndicator
     from src.utils.chart_data_exporter import ChartDataExporter
-    
-    # Create backtrader data feed
-    class ArrayData(bt.feeds.PandasData):
-      params = (
-        ('datetime', None),
-        ('open', -1),
-        ('high', -1),
-        ('low', -1),
-        ('close', -1),
-        ('volume', -1),
-        ('openinterest', -1),
-      )
 
     df = pd.DataFrame({
       'datetime': pd.to_datetime(times_s, unit='s', utc=True),
@@ -139,7 +127,9 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     
     # Create minimal cerebro setup
     cerebro = bt.Cerebro()
-    data = ArrayData(dataname=df)
+    
+    # Use PandasData with proper datetime column
+    data = bt.feeds.PandasData(dataname=df, datetime='datetime')
     cerebro.adddata(data)
     
     # Add the BreakoutIndicator (same as backtesting)
