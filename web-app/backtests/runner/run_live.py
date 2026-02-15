@@ -364,7 +364,7 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
   
   print(f"DEBUG Fallback: {symbol} - Current ATR: {current_atr}")
   
-  # Find significant swing highs and lows
+  # Find significant swing highs and lows with their actual times
   resistance_levels = []
   support_levels = []
   
@@ -384,7 +384,7 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
       # Check if this resistance is significant (based on ATR)
       recent_low = min(lows[max(0, i - swing_period):i + 1])
       if current_high - recent_low > current_atr * 0.5:  # Significant move
-        resistance_levels.append(current_high)
+        resistance_levels.append((current_high, times_s[i]))  # Store level with its actual time
     
     # Check for swing low (support)
     is_swing_low = True
@@ -398,7 +398,7 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
       # Check if this support is significant
       recent_high = max(highs[max(0, i - swing_period):i + 1])
       if recent_high - current_low > current_atr * 0.5:  # Significant move
-        support_levels.append(current_low)
+        support_levels.append((current_low, times_s[i]))  # Store level with its actual time
   
   # Cluster nearby levels to avoid too many zones
   def cluster_levels(levels, atr_multiplier=0.5):
@@ -406,15 +406,15 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
       return []
     
     clustered = []
-    levels.sort()
+    levels.sort(key=lambda x: x[0])  # Sort by price level
     
-    for level in levels:
+    for level, time in levels:
       if not clustered:
-        clustered.append(level)
+        clustered.append((level, time))
       else:
         # Check if this level is far enough from the last clustered level
-        if abs(level - clustered[-1]) > current_atr * atr_multiplier:
-          clustered.append(level)
+        if abs(level - clustered[-1][0]) > current_atr * atr_multiplier:
+          clustered.append((level, time))
     
     return clustered
   
@@ -430,26 +430,19 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
   # Zone expiration time (in seconds) - zones should expire after some time
   zone_duration = lookback * 60 * 60  # lookback hours in seconds
   
-  for i, level in enumerate(resistance_levels):
-    # Find the time when this resistance level was detected
-    # Use the corresponding time from the original data
-    resistance_time = times_s[min(i * swing_period + swing_period, len(times_s) - 1)]
-    
-    # Create segment that lasts for zone_duration
+  for level, detection_time in resistance_levels:
+    # Create segment that starts when the level was detected and lasts for zone_duration
     resistance_segments.append({
-      'startTime': resistance_time,
-      'endTime': min(resistance_time + zone_duration, times_s[-1]),
+      'startTime': detection_time,
+      'endTime': min(detection_time + zone_duration, times_s[-1]),
       'value': level + 0.00001  # Small padding
     })
   
-  for i, level in enumerate(support_levels):
-    # Find the time when this support level was detected
-    support_time = times_s[min(i * swing_period + swing_period, len(times_s) - 1)]
-    
-    # Create segment that lasts for zone_duration
+  for level, detection_time in support_levels:
+    # Create segment that starts when the level was detected and lasts for zone_duration
     support_segments.append({
-      'startTime': support_time,
-      'endTime': min(support_time + zone_duration, times_s[-1]),
+      'startTime': detection_time,
+      'endTime': min(detection_time + zone_duration, times_s[-1]),
       'value': level - 0.00001  # Small padding
     })
   
