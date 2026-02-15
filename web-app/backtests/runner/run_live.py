@@ -423,25 +423,33 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
   
   print(f"DEBUG Fallback: {symbol} - Found {len(resistance_levels)} resistance levels, {len(support_levels)} support levels")
   
-  # Convert to segments
+  # Convert to segments with proper time limits
   resistance_segments = []
   support_segments = []
   
-  # Create segments that span the entire chart duration
-  start_time = times_s[0]
-  end_time = times_s[-1]
+  # Zone expiration time (in seconds) - zones should expire after some time
+  zone_duration = lookback * 60 * 60  # lookback hours in seconds
   
-  for level in resistance_levels:
+  for i, level in enumerate(resistance_levels):
+    # Find the time when this resistance level was detected
+    # Use the corresponding time from the original data
+    resistance_time = times_s[min(i * swing_period + swing_period, len(times_s) - 1)]
+    
+    # Create segment that lasts for zone_duration
     resistance_segments.append({
-      'startTime': start_time,
-      'endTime': end_time,
+      'startTime': resistance_time,
+      'endTime': min(resistance_time + zone_duration, times_s[-1]),
       'value': level + 0.00001  # Small padding
     })
   
-  for level in support_levels:
+  for i, level in enumerate(support_levels):
+    # Find the time when this support level was detected
+    support_time = times_s[min(i * swing_period + swing_period, len(times_s) - 1)]
+    
+    # Create segment that lasts for zone_duration
     support_segments.append({
-      'startTime': start_time,
-      'endTime': end_time,
+      'startTime': support_time,
+      'endTime': min(support_time + zone_duration, times_s[-1]),
       'value': level - 0.00001  # Small padding
     })
   
