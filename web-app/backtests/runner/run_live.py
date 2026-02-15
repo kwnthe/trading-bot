@@ -104,7 +104,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
   Get zones from the actual BreakoutIndicator with support1 and resistance1 lines.
   This uses the same indicator as backtesting for perfect consistency.
   """
-  print(f"*** LATEST CODE v2.0 RUNNING - {symbol} - {datetime.now().isoformat()} ***")
+  print(f"=== VERSION 3.0 FINAL CODE - {symbol} - {datetime.now().isoformat()} ===")
   
   if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
@@ -166,6 +166,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     
     # Try to get indicator from cerebro.indicators (direct access)
     try:
+        print(f"DEBUG Strategy: {symbol} - About to check cerebro.indicators")
         if hasattr(cerebro, 'indicators') and len(cerebro.indicators) > 0:
             print(f"DEBUG Strategy: {symbol} - Using cerebro.indicators")
             indicator_tuple = cerebro.indicators[0]
@@ -179,6 +180,11 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                 print(f"DEBUG Strategy: {symbol} - actual indicator type: {type(breakout)}")
             else:
                 breakout = indicator_tuple
+                
+            print(f"DEBUG Strategy: {symbol} - breakout has lines: {hasattr(breakout, 'lines')}")
+            if hasattr(breakout, 'lines'):
+                print(f"DEBUG Strategy: {symbol} - breakout.lines has resistance1: {hasattr(breakout.lines, 'resistance1')}")
+                print(f"DEBUG Strategy: {symbol} - breakout.lines has support1: {hasattr(breakout.lines, 'support1')}")
                 
             if hasattr(breakout, 'lines') and hasattr(breakout.lines, 'resistance1') and hasattr(breakout.lines, 'support1'):
                 import numpy as np
@@ -194,10 +200,14 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                     print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
                 
                 return zones
+            else:
+                print(f"DEBUG Strategy: {symbol} - Missing required attributes on breakout indicator")
         else:
             print(f"DEBUG Strategy: {symbol} - No cerebro.indicators found")
     except Exception as e:
         print(f"Warning: cerebro.indicators extraction failed: {e}")
+        import traceback
+        traceback.print_exc()
         # Fall back to manual extraction
         pass
     
