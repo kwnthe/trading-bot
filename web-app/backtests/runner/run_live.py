@@ -340,33 +340,89 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
 
 def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
   """
-  Very simple zone calculation that creates clean lines like the backtest.
-  Just find major levels and create long horizontal segments.
+  Enhanced fallback zone calculation that mimics BreakoutIndicator behavior.
+  This creates realistic support and resistance zones based on price action.
   """
   if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
-
+  
+  import numpy as np
+  
+  # Calculate ATR for dynamic zone spacing
+  atr_values = []
+  for i in range(1, len(closes)):
+    tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+    atr_values.append(tr)
+  
+  atr_period = min(14, len(atr_values))
+  current_atr = sum(atr_values[-atr_period:]) / atr_period if atr_values else (highs[0] - lows[0]) * 0.02
+  
+  print(f"DEBUG Fallback: {symbol} - Current ATR: {current_atr}")
+  
+  # Find significant swing highs and lows
+  resistance_levels = []
+  support_levels = []
+  
+  # Use a swing detection algorithm
+  swing_period = max(5, lookback // 10)  # Dynamic swing period
+  
+  for i in range(swing_period, len(times_s) - swing_period):
+    # Check for swing high (resistance)
+    is_swing_high = True
+    current_high = highs[i]
+    for j in range(i - swing_period, i + swing_period + 1):
+      if j != i and highs[j] >= current_high:
+        is_swing_high = False
+        break
+    
+    if is_swing_high:
+      # Check if this resistance is significant (based on ATR)
+      recent_low = min(lows[max(0, i - swing_period):i + 1])
+      if current_high - recent_low > current_atr * 0.5:  # Significant move
+        resistance_levels.append(current_high)
+    
+    # Check for swing low (support)
+    is_swing_low = True
+    current_low = lows[i]
+    for j in range(i - swing_period, i + swing_period + 1):
+      if j != i and lows[j] <= current_low:
+        is_swing_low = False
+        break
+    
+    if is_swing_low:
+      # Check if this support is significant
+      recent_high = max(highs[max(0, i - swing_period):i + 1])
+      if recent_high - current_low > current_atr * 0.5:  # Significant move
+        support_levels.append(current_low)
+  
+  # Cluster nearby levels to avoid too many zones
+  def cluster_levels(levels, atr_multiplier=0.5):
+    if not levels:
+      return []
+    
+    clustered = []
+    levels.sort()
+    
+    for level in levels:
+      if not clustered:
+        clustered.append(level)
+      else:
+        # Check if this level is far enough from the last clustered level
+        if abs(level - clustered[-1]) > current_atr * atr_multiplier:
+          clustered.append(level)
+    
+    return clustered
+  
+  resistance_levels = cluster_levels(resistance_levels)
+  support_levels = cluster_levels(support_levels)
+  
+  print(f"DEBUG Fallback: {symbol} - Found {len(resistance_levels)} resistance levels, {len(support_levels)} support levels")
+  
+  # Convert to segments
   resistance_segments = []
   support_segments = []
   
-  # Find the overall high and low ranges
-  overall_high = max(highs)
-  overall_low = min(lows)
-  price_range = overall_high - overall_low
-  
-  # Create a few major resistance levels (top 20% of price range)
-  resistance_levels = []
-  for i in range(5):  # 5 resistance levels
-    level = overall_high - (price_range * 0.2 * i)  # Every 20% of range
-    resistance_levels.append(level)
-  
-  # Create a few major support levels (bottom 20% of price range)
-  support_levels = []
-  for i in range(5):  # 5 support levels
-    level = overall_low + (price_range * 0.2 * i)  # Every 20% of range
-    support_levels.append(level)
-  
-  # Create long continuous segments for each level
+  # Create segments that span the entire chart duration
   start_time = times_s[0]
   end_time = times_s[-1]
   
@@ -374,14 +430,14 @@ def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[f
     resistance_segments.append({
       'startTime': start_time,
       'endTime': end_time,
-      'value': level
+      'value': level + 0.00001  # Small padding
     })
   
   for level in support_levels:
     support_segments.append({
       'startTime': start_time,
       'endTime': end_time,
-      'value': level
+      'value': level - 0.00001  # Small padding
     })
   
   print(f"DEBUG Fallback: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones")
