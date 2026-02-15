@@ -104,12 +104,17 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
   Get zones from the actual BreakoutIndicator with support1 and resistance1 lines.
   This uses the same indicator as backtesting for perfect consistency.
   """
-  print(f"=== VERSION 3.0 FINAL CODE - {symbol} - {datetime.now().isoformat()} ===")
+  print(f"!!! CACHE CLEARED VERSION 4.0 - {symbol} - {datetime.now().isoformat()} !!!")
+  print(f"DEBUG: Starting _get_zones_from_strategy for {symbol}")
   
   if not times_s or not highs or not lows or not closes:
+    print(f"DEBUG: Early return - missing data for {symbol}")
     return {'resistanceSegments': [], 'supportSegments': []}
   
+  print(f"DEBUG: About to enter try block for {symbol}")
+  
   try:
+    print(f"DEBUG: Inside try block for {symbol}")
     # Add project root to path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
     
@@ -117,6 +122,8 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     import pandas as pd
     from src.indicators.BreakoutIndicator import BreakoutIndicator
     from src.utils.chart_data_exporter import ChartDataExporter
+
+    print(f"DEBUG: Imports successful for {symbol}")
 
     df = pd.DataFrame({
       'datetime': pd.to_datetime(times_s, unit='s', utc=True),
@@ -126,6 +133,8 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
       'open': closes,  # Use close as open since we don't have open prices
       'volume': [1] * len(times_s),  # Dummy volume
     })
+    
+    print(f"DEBUG: DataFrame created for {symbol} with {len(df)} rows")
     
     # Create minimal cerebro setup
     cerebro = bt.Cerebro()
@@ -137,8 +146,12 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     # Add the BreakoutIndicator (same as backtesting)
     cerebro.addindicator(BreakoutIndicator, symbol=symbol)
     
+    print(f"DEBUG: About to run cerebro for {symbol}")
+    
     # Run to calculate indicators
     results = cerebro.run(runonce=True)
+    
+    print(f"DEBUG: Cerebro run completed for {symbol}, results: {len(results)}")
     
     # Extract zones from the BreakoutIndicator (same way as backtest)
     zones = {"supportSegments": [], "resistanceSegments": []}
@@ -292,8 +305,11 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
   except Exception as e:
     # If strategy execution fails, use fallback
     print(f"Warning: BreakoutIndicator failed, using fallback: {e}")
+    import traceback
+    traceback.print_exc()
     return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
   
+  print(f"DEBUG: Reached end of function for {symbol}")
   return {'resistanceSegments': [], 'supportSegments': []}
 
 
