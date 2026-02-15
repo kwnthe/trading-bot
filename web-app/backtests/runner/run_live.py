@@ -104,7 +104,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
   Get zones from the actual BreakoutIndicator with support1 and resistance1 lines.
   This uses the same indicator as backtesting for perfect consistency.
   """
-  print(f"🔥🔥🔥 LATEST CODE RUNNING - {symbol} - {datetime.now().isoformat()} 🔥🔥🔥")
+  print(f"*** LATEST CODE v2.0 RUNNING - {symbol} - {datetime.now().isoformat()} ***")
   
   if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
