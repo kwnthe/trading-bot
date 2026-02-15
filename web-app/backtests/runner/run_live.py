@@ -142,31 +142,39 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     zones = {"supportSegments": [], "resistanceSegments": []}
     
     # Debug: Check what indicators we have
-    print(f"DEBUG Strategy: {symbol} - cerebro attributes: {[attr for attr in dir(cerebro) if not attr.startswith('_')]}")
+    print(f"DEBUG Strategy: {symbol} - cerebro has indicators: {hasattr(cerebro, 'indicators')}")
+    if hasattr(cerebro, 'indicators'):
+        print(f"DEBUG Strategy: {symbol} - cerebro indicators count: {len(cerebro.indicators)}")
+        if len(cerebro.indicators) > 0:
+            indicator = cerebro.indicators[0]
+            print(f"DEBUG Strategy: {symbol} - indicator type: {type(indicator)}")
+            print(f"DEBUG Strategy: {symbol} - indicator lines: {[line for line in dir(indicator.lines) if not line.startswith('_')]}")
+    
     print(f"DEBUG Strategy: {symbol} - results count: {len(results)}")
     if results and len(results) > 0:
         strategy = results[0]
-        print(f"DEBUG Strategy: {symbol} - strategy attributes: {[attr for attr in dir(strategy) if 'indicator' in attr.lower()]}")
-        if hasattr(strategy, '_indicators'):
-            print(f"DEBUG Strategy: {symbol} - strategy indicators count: {len(strategy._indicators)}")
-            if len(strategy._indicators) > 0:
-                indicator = strategy._indicators[0]
-                print(f"DEBUG Strategy: {symbol} - indicator type: {type(indicator)}")
-                print(f"DEBUG Strategy: {symbol} - indicator lines: {[line for line in dir(indicator.lines) if not line.startswith('_')]}")
+        print(f"DEBUG Strategy: {symbol} - strategy has getindicators: {hasattr(strategy, 'getindicators')}")
+        if hasattr(strategy, 'getindicators'):
+            indicators = strategy.getindicators()
+            print(f"DEBUG Strategy: {symbol} - strategy indicators count: {len(indicators)}")
+            if len(indicators) > 0:
+                indicator = indicators[0]
+                print(f"DEBUG Strategy: {symbol} - strategy indicator type: {type(indicator)}")
+                print(f"DEBUG Strategy: {symbol} - strategy indicator lines: {[line for line in dir(indicator.lines) if not line.startswith('_')]}")
     
+    # Try to get indicator from cerebro.indicators (direct access)
     try:
-        if hasattr(cerebro, "data_indicators"):
-            print(f"DEBUG Strategy: {symbol} - Found cerebro.data_indicators")
-            indicators = cerebro.data_indicators.get(0)  # First data feed
-            breakout = indicators.get("breakout") if indicators else None
-            if breakout is not None:
+        if hasattr(cerebro, 'indicators') and len(cerebro.indicators) > 0:
+            print(f"DEBUG Strategy: {symbol} - Using cerebro.indicators")
+            breakout = cerebro.indicators[0]
+            if hasattr(breakout, 'lines') and hasattr(breakout.lines, 'resistance1') and hasattr(breakout.lines, 'support1'):
                 import numpy as np
                 res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
                 sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
                 zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
                 zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
                 
-                print(f"DEBUG Strategy: {symbol} - Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from BreakoutIndicator")
+                print(f"DEBUG Strategy: {symbol} - Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from cerebro.indicators")
                 if zones['supportSegments']:
                     print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
                 if zones['resistanceSegments']:
@@ -174,9 +182,39 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                 
                 return zones
         else:
-            print(f"DEBUG Strategy: {symbol} - No cerebro.data_indicators found")
+            print(f"DEBUG Strategy: {symbol} - No cerebro.indicators found")
     except Exception as e:
-        print(f"Warning: BreakoutIndicator extraction failed: {e}")
+        print(f"Warning: cerebro.indicators extraction failed: {e}")
+        # Fall back to manual extraction
+        pass
+    
+    # Try to get indicator from strategy.getindicators()
+    try:
+        if results and len(results) > 0:
+            strategy = results[0]
+            if hasattr(strategy, 'getindicators'):
+                print(f"DEBUG Strategy: {symbol} - Using strategy.getindicators()")
+                indicators = strategy.getindicators()
+                if len(indicators) > 0:
+                    breakout = indicators[0]
+                    if hasattr(breakout, 'lines') and hasattr(breakout.lines, 'resistance1') and hasattr(breakout.lines, 'support1'):
+                        import numpy as np
+                        res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
+                        sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
+                        zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
+                        zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
+                        
+                        print(f"DEBUG Strategy: {symbol} - Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from strategy.getindicators")
+                        if zones['supportSegments']:
+                            print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
+                        if zones['resistanceSegments']:
+                            print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
+                        
+                        return zones
+        else:
+            print(f"DEBUG Strategy: {symbol} - No strategy.getindicators found")
+    except Exception as e:
+        print(f"Warning: strategy.getindicators extraction failed: {e}")
         # Fall back to manual extraction
         pass
     
