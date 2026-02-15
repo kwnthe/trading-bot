@@ -243,10 +243,23 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                 indicators = strategy.getindicators()
                 if len(indicators) > 0:
                     breakout = indicators[0]
+                    print(f"DEBUG Strategy: {symbol} - breakout type: {type(breakout)}")
+                    print(f"DEBUG Strategy: {symbol} - breakout has lines: {hasattr(breakout, 'lines')}")
+                    if hasattr(breakout, 'lines'):
+                        print(f"DEBUG Strategy: {symbol} - breakout.lines has resistance1: {hasattr(breakout.lines, 'resistance1')}")
+                        print(f"DEBUG Strategy: {symbol} - breakout.lines has support1: {hasattr(breakout.lines, 'support1')}")
+                        
                     if hasattr(breakout, 'lines') and hasattr(breakout.lines, 'resistance1') and hasattr(breakout.lines, 'support1'):
                         import numpy as np
+                        print(f"DEBUG Strategy: {symbol} - resistance1 array length: {len(breakout.lines.resistance1.array)}")
+                        print(f"DEBUG Strategy: {symbol} - support1 array length: {len(breakout.lines.support1.array)}")
+                        
                         res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
                         sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
+                        
+                        print(f"DEBUG Strategy: {symbol} - Sample resistance values: {res_vals[:10]}")
+                        print(f"DEBUG Strategy: {symbol} - Sample support values: {sup_vals[:10]}")
+                        
                         zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
                         zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
                         
@@ -261,6 +274,8 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
             print(f"DEBUG Strategy: {symbol} - No strategy.getindicators found")
     except Exception as e:
         print(f"Warning: strategy.getindicators extraction failed: {e}")
+        import traceback
+        traceback.print_exc()
         # Fall back to manual extraction
         pass
     
