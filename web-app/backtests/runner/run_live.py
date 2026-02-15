@@ -104,7 +104,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
   Get zones from the actual BreakoutIndicator by replicating the backtest setup exactly.
   This uses the same BreakRetestStrategy that the backtest uses.
   """
-  print(f"!!! CACHE CLEARED VERSION 4.0 - {symbol} - {datetime.now().isoformat()} !!!")
+  print(f"!!! CACHE CLEARED VERSION 5.0 - {symbol} - {datetime.now().isoformat()} !!!")
   print(f"DEBUG: Starting _get_zones_from_strategy for {symbol}")
   
   if not times_s or not highs or not lows or not closes:
@@ -116,11 +116,33 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
   try:
     print(f"DEBUG: Inside try block for {symbol}")
     # Add project root to path
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+    project_root = str(Path(__file__).parent.parent.parent.parent)
+    sys.path.insert(0, project_root)
+    sys.path.insert(0, str(Path(project_root) / "src"))  # Add src to path for indicators import
     
     import backtrader as bt
     import pandas as pd
     import os
+    
+    # Set environment variables BEFORE any imports (critical for BreakoutIndicator)
+    env_vars = {
+      'price_precision': '5',
+      'volume_precision': '1',  # Fixed: must be >= 1 for config validation
+      'mode': 'backtest',
+      'market_type': 'forex',
+      'breakout_lookback_period': '50',
+      'zone_inversion_margin_atr': '0.5',
+      'breakout_min_strength_atr': '0.5',
+      'atr_length': '14',
+      'ema_length': '20',
+      'volume_ma_length': '20',
+      'rr': '2.0',
+      'initial_equity': '10000.0'
+    }
+    
+    for k, v in env_vars.items():
+      os.environ[k] = v
+      print(f"DEBUG: Set env var {k}={v}")
     
     # Set up environment like the backtest does
     from src.utils.config import Config, load_config
@@ -129,23 +151,18 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     try:
       config = load_config()
       print(f"DEBUG: Config loaded successfully for {symbol}")
+      print(f"DEBUG: Config breakout_lookback_period: {getattr(config, 'breakout_lookback_period', 'NOT_SET')}")
+      print(f"DEBUG: Config atr_length: {getattr(config, 'atr_length', 'NOT_SET')}")
     except Exception as e:
       print(f"DEBUG: Config loading failed for {symbol}: {e}")
       # Set minimal config for testing
-      os.environ['price_precision'] = '5'
-      os.environ['volume_precision'] = '0'
-      os.environ['mode'] = 'backtest'
-      os.environ['market_type'] = 'forex'
-      os.environ['breakout_lookback_period'] = '50'
-      os.environ['zone_inversion_margin_atr'] = '0.5'
-      os.environ['breakout_min_strength_atr'] = '0.5'
-      os.environ['rr'] = '2.0'
-      os.environ['initial_equity'] = '10000.0'
       config = load_config()
     
     from src.strategies.BreakRetestStrategy import BreakRetestStrategy
     from src.brokers.backtesting_broker import BacktestingBroker
     from src.brokers.ForexLeverage import ForexLeverage
+    from indicators.BreakoutIndicator import BreakoutIndicator  # Match main.py pattern
+    from indicators.BreakRetestIndicator import BreakRetestIndicator  # Match main.py pattern
 
     print(f"DEBUG: Imports successful for {symbol}")
 
@@ -166,6 +183,8 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     # Set up data_indicators like the backtest
     cerebro.data_indicators = {}
     cerebro.data_state = {}
+    cerebro.candle_data = {}
+    cerebro.chart_markers = {}
     cerebro.broker.addcommissioninfo(ForexLeverage())
     
     # Use PandasData with proper datetime column
@@ -173,15 +192,45 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     data._name = symbol
     cerebro.adddata(data, name=symbol)
     
-    # Add the BreakRetestStrategy (same as backtest)
-    cerebro.addstrategy(BreakRetestStrategy, symbol=symbol, rr=Config.rr)
+    # CRITICAL: Populate data_indicators with actual indicator instances BEFORE adding strategy
+    # This replicates exactly what BaseStrategy.__init__ does
+    original_data_index = 0  # We only have one data feed
+    cerebro.data_indicators[original_data_index] = {
+        'breakout': BreakoutIndicator(data, symbol=symbol),
+        'break_retest': BreakRetestIndicator(data, symbol=symbol),
+        'atr': bt.indicators.ATR(data, period=Config.atr_length),
+        'ema': bt.indicators.EMA(data.close, period=Config.ema_length),
+        'volume_ma': bt.indicators.SMA(data.volume, period=Config.volume_ma_length),
+        'rsi': bt.indicators.RSI(data.close, period=14),
+        'symbol': symbol,
+        'data': data
+    }
     
-    print(f"DEBUG: About to run cerebro for {symbol}")
+    cerebro.data_state[original_data_index] = {
+        'just_broke_out': None,
+        'breakout_trend': None,
+        'support': None,
+        'resistance': None,
+    }
+    cerebro.candle_data[original_data_index] = []
+    cerebro.chart_markers[original_data_index] = {}
     
-    # Run to calculate indicators
-    results = cerebro.run()
+    print(f"DEBUG: data_indicators populated for {symbol}: {list(cerebro.data_indicators[0].keys())}")
     
-    print(f"DEBUG: Cerebro run completed for {symbol}, results: {len(results)}")
+    # Add indicators to cerebro for calculation
+    # This ensures the indicators are actually computed during the run
+    cerebro.addindicator(BreakoutIndicator, symbol=symbol)
+    cerebro.addindicator(bt.indicators.ATR, period=Config.atr_length)
+    cerebro.addindicator(bt.indicators.EMA, period=Config.ema_length)
+    
+    # Extract zones directly from indicators without running strategy
+    # This avoids the index out of range error when strategy tries to access indicators too early
+    print(f"DEBUG: Extracting zones directly from indicators for {symbol}")
+    
+    # Run cerebro with minimal settings to calculate indicators only
+    cerebro.run(runonce=True, preload=True)
+    
+    print(f"DEBUG: Cerebro run completed for {symbol}")
     
     # Extract zones exactly like the backtest does
     zones = {"supportSegments": [], "resistanceSegments": []}
@@ -189,6 +238,56 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     # Debug: Check what indicators we have
     print(f"DEBUG Strategy: {symbol} - cerebro has indicators: {hasattr(cerebro, 'indicators')}")
     print(f"DEBUG Strategy: {symbol} - cerebro has data_indicators: {hasattr(cerebro, 'data_indicators')}")
+    print(f"DEBUG Strategy: {symbol} - cerebro.indicators length: {len(cerebro.indicators) if hasattr(cerebro, 'indicators') else 'N/A'}")
+    
+    # Try to extract from cerebro.indicators first (this is where indicators added via addindicator end up)
+    if hasattr(cerebro, 'indicators') and len(cerebro.indicators) > 0:
+        try:
+            print(f"DEBUG Strategy: {symbol} - Trying cerebro.indicators approach")
+            # cerebro.indicators contains tuples of (indicator_class, args, params)
+            # We need to access the actual indicator instance
+            for idx, indicator_tuple in enumerate(cerebro.indicators):
+                print(f"DEBUG Strategy: {symbol} - indicator {idx} type: {type(indicator_tuple)}")
+                if isinstance(indicator_tuple, tuple) and len(indicator_tuple) >= 1:
+                    indicator_instance = indicator_tuple[0]
+                    print(f"DEBUG Strategy: {symbol} - indicator_instance {idx} type: {type(indicator_instance)}")
+                    
+                    # Check if this is our BreakoutIndicator
+                    if 'BreakoutIndicator' in str(type(indicator_instance)):
+                        breakout_indicator = indicator_instance
+                        print(f"DEBUG Strategy: {symbol} - Found BreakoutIndicator at index {idx}")
+                        
+                        if hasattr(breakout_indicator, 'lines') and hasattr(breakout_indicator.lines, 'resistance1'):
+                            import numpy as np
+                            res_vals = np.asarray(breakout_indicator.lines.resistance1.array, dtype=float)
+                            sup_vals = np.asarray(breakout_indicator.lines.support1.array, dtype=float)
+                            
+                            print(f"DEBUG Strategy: {symbol} - resistance1 array length: {len(res_vals)}")
+                            print(f"DEBUG Strategy: {symbol} - support1 array length: {len(sup_vals)}")
+                            print(f"DEBUG Strategy: {symbol} - Sample resistance values: {res_vals[:10]}")
+                            print(f"DEBUG Strategy: {symbol} - Sample support values: {sup_vals[:10]}")
+                            
+                            # Check if we have real values (not all NaN and not empty)
+                            if len(res_vals) > 0 and len(sup_vals) > 0 and not (np.all(np.isnan(res_vals)) and np.all(np.isnan(sup_vals))):
+                                zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
+                                zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
+                                
+                                print(f"DEBUG Strategy: {symbol} - Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from cerebro.indicators")
+                                if zones['supportSegments']:
+                                    print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
+                                if zones['resistanceSegments']:
+                                    print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
+                                
+                                return zones
+                            else:
+                                print(f"DEBUG Strategy: {symbol} - BreakoutIndicator yielded empty/NaN values")
+                        break
+        except Exception as e:
+            print(f"Warning: cerebro.indicators extraction failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Fallback to data_indicators approach
     if hasattr(cerebro, 'data_indicators'):
         print(f"DEBUG Strategy: {symbol} - data_indicators type: {type(cerebro.data_indicators)}")
         print(f"DEBUG Strategy: {symbol} - data_indicators content: {cerebro.data_indicators}")
