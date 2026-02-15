@@ -158,6 +158,11 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     
     # Debug: Check what indicators we have
     print(f"DEBUG Strategy: {symbol} - cerebro has indicators: {hasattr(cerebro, 'indicators')}")
+    print(f"DEBUG Strategy: {symbol} - cerebro has data_indicators: {hasattr(cerebro, 'data_indicators')}")
+    if hasattr(cerebro, 'data_indicators'):
+        print(f"DEBUG Strategy: {symbol} - data_indicators type: {type(cerebro.data_indicators)}")
+        print(f"DEBUG Strategy: {symbol} - data_indicators content: {cerebro.data_indicators}")
+        
     if hasattr(cerebro, 'indicators'):
         print(f"DEBUG Strategy: {symbol} - cerebro indicators count: {len(cerebro.indicators)}")
         if len(cerebro.indicators) > 0:
