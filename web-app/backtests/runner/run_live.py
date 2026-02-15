@@ -138,7 +138,32 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     # Run to calculate indicators
     results = cerebro.run(runonce=True)
     
-    # Extract zones from the BreakoutIndicator
+    # Extract zones from the BreakoutIndicator (same way as backtest)
+    zones = {"supportSegments": [], "resistanceSegments": []}
+    try:
+        if hasattr(cerebro, "data_indicators"):
+            indicators = cerebro.data_indicators.get(0)  # First data feed
+            breakout = indicators.get("breakout") if indicators else None
+            if breakout is not None:
+                import numpy as np
+                res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
+                sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
+                zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
+                zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
+                
+                print(f"DEBUG Strategy: {symbol} - Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from BreakoutIndicator")
+                if zones['supportSegments']:
+                    print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
+                if zones['resistanceSegments']:
+                    print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
+                
+                return zones
+    except Exception as e:
+        print(f"Warning: BreakoutIndicator extraction failed: {e}")
+        # Fall back to manual extraction
+        pass
+    
+    # Fallback: try to extract from strategy results
     if results and len(results) > 0:
       strategy = results[0]
       
@@ -146,11 +171,9 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
       if hasattr(strategy, '_indicators') and len(strategy._indicators) > 0:
         breakout_indicator = strategy._indicators[0]
         
-        # Extract support, resistance, EMA, and marker values from the indicator lines
+        # Extract support and resistance values from the indicator lines
         support_values = []
         resistance_values = []
-        ema_values = []
-        markers = []
         
         for i in range(len(times_s)):
           # Get support from support1 line
@@ -172,69 +195,25 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
               resistance_values.append(float('nan'))
           else:
             resistance_values.append(float('nan'))
-          
-          # Get EMA if available
-          if hasattr(breakout_indicator, 'ema') and i < len(breakout_indicator.ema):
-            ema_val = breakout_indicator.ema[i]
-            if not math.isnan(ema_val):
-              ema_values.append(float(ema_val))
-            else:
-              ema_values.append(float('nan'))
-          else:
-            ema_values.append(float('nan'))
         
-        # Extract markers from cerebro chart_data or chart_markers
-        cerebro_markers = []
-        if hasattr(cerebro, 'chart_data') and 0 in cerebro.chart_data:
-          chart_data = cerebro.chart_data[0]
-          if 'marker' in chart_data:
-            for point in chart_data['marker'].points:
-              cerebro_markers.append({
-                'time': point.time,
-                'value': point.value,
-                'type': point.extra_data.get('marker_type', 'diamond'),
-                'color': '#FF0000',
-                'size': 8
-              })
-        elif hasattr(cerebro, 'chart_markers') and 0 in cerebro.chart_markers:
-          # Fallback to old chart_markers format
-          chart_markers = cerebro.chart_markers[0]
-          for candle_index, marker_info in chart_markers.items():
-            if candle_index < len(times_s):
-              cerebro_markers.append({
-                'time': times_s[candle_index],
-                'value': marker_info['price'],
-                'type': marker_info.get('type', 'diamond'),
-                'color': '#FF0000',
-                'size': 8
-              })
+        # Convert to segments using the same logic as backtest
+        resistance_segments = _segments_from_constant_levels(times_s, resistance_values)
+        support_segments = _segments_from_constant_levels(times_s, support_values)
         
-        # Use the clean chart data exporter
-        chart_data = ChartDataExporter.export_chart_data(
-            symbol=symbol,
-            times=times_s,
-            opens=closes,  # Using close as open
-            highs=highs,
-            lows=lows,
-            closes=closes,
-            support_values=support_values,
-            resistance_values=resistance_values,
-            ema_values=ema_values if any(not math.isnan(v) for v in ema_values) else None,
-            markers=cerebro_markers
-        )
+        print(f"DEBUG Strategy: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones from strategy")
+        if support_segments:
+          print(f"DEBUG Strategy: Sample support: {support_segments[0]}")
+        if resistance_segments:
+          print(f"DEBUG Strategy: Sample resistance: {resistance_segments[0]}")
         
-        # Convert to legacy format for compatibility
         return {
-          'resistanceSegments': chart_data['zones']['resistance'],
-          'supportSegments': chart_data['zones']['support'],
-          'chartData': chart_data  # New clean format
+          'resistanceSegments': resistance_segments,
+          'supportSegments': support_segments,
         }
     
   except Exception as e:
     # If strategy execution fails, use fallback
     print(f"Warning: BreakoutIndicator failed, using fallback: {e}")
-    import traceback
-    traceback.print_exc()
     return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
   
   return {'resistanceSegments': [], 'supportSegments': []}
