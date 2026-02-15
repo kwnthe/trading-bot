@@ -266,7 +266,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                             zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
                             zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
                             
-                            print(f"DEBUG Strategy: {symbol} - ✅ SUCCESS: Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from BreakoutIndicator")
+                            print(f"DEBUG Strategy: {symbol} - SUCCESS: Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from BreakoutIndicator")
                             if zones['supportSegments']:
                                 print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
                             if zones['resistanceSegments']:
@@ -308,7 +308,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                     zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
                     zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
                     
-                    print(f"DEBUG Strategy: {symbol} - ✅ SUCCESS: Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from BreakoutIndicator")
+                    print(f"DEBUG Strategy: {symbol} - SUCCESS: Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from BreakoutIndicator")
                     if zones['supportSegments']:
                         print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
                     if zones['resistanceSegments']:
@@ -316,9 +316,9 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                     
                     return zones
                 else:
-                    print(f"DEBUG Strategy: {symbol} - ❌ BreakoutIndicator arrays are empty or NaN, using fallback")
+                    print(f"DEBUG Strategy: {symbol} - ERROR: BreakoutIndicator arrays are empty or NaN, using fallback")
             else:
-                print(f"DEBUG Strategy: {symbol} - ❌ BreakoutIndicator is None, using fallback")
+                print(f"DEBUG Strategy: {symbol} - ERROR: BreakoutIndicator is None, using fallback")
         except Exception as e:
             print(f"Warning: data_indicators extraction failed: {e}")
             import traceback
