@@ -260,6 +260,11 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                         print(f"DEBUG Strategy: {symbol} - Sample resistance values: {res_vals[:10]}")
                         print(f"DEBUG Strategy: {symbol} - Sample support values: {sup_vals[:10]}")
                         
+                        # Check if all values are NaN
+                        if np.all(np.isnan(res_vals)) and np.all(np.isnan(sup_vals)):
+                            print(f"DEBUG Strategy: {symbol} - All values are NaN, using fallback")
+                            return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
+                        
                         zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
                         zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
                         
