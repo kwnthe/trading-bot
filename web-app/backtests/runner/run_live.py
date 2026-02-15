@@ -101,8 +101,8 @@ def _compute_ema(times_s: list[int], closes: list[float], ema_len: int) -> list[
 
 def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
   """
-  Get zones from the actual BreakoutIndicator with support1 and resistance1 lines.
-  This uses the same indicator as backtesting for perfect consistency.
+  Get zones from the actual BreakoutIndicator by replicating the backtest setup exactly.
+  This uses the same BreakRetestStrategy that the backtest uses.
   """
   print(f"!!! CACHE CLEARED VERSION 4.0 - {symbol} - {datetime.now().isoformat()} !!!")
   print(f"DEBUG: Starting _get_zones_from_strategy for {symbol}")
@@ -120,8 +120,32 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     
     import backtrader as bt
     import pandas as pd
-    from src.indicators.BreakoutIndicator import BreakoutIndicator
-    from src.utils.chart_data_exporter import ChartDataExporter
+    import os
+    
+    # Set up environment like the backtest does
+    from src.utils.config import Config, load_config
+    
+    # Load config to ensure BreakoutIndicator has all required parameters
+    try:
+      config = load_config()
+      print(f"DEBUG: Config loaded successfully for {symbol}")
+    except Exception as e:
+      print(f"DEBUG: Config loading failed for {symbol}: {e}")
+      # Set minimal config for testing
+      os.environ['price_precision'] = '5'
+      os.environ['volume_precision'] = '0'
+      os.environ['mode'] = 'backtest'
+      os.environ['market_type'] = 'forex'
+      os.environ['breakout_lookback_period'] = '50'
+      os.environ['zone_inversion_margin_atr'] = '0.5'
+      os.environ['breakout_min_strength_atr'] = '0.5'
+      os.environ['rr'] = '2.0'
+      os.environ['initial_equity'] = '10000.0'
+      config = load_config()
+    
+    from src.strategies.BreakRetestStrategy import BreakRetestStrategy
+    from src.brokers.backtesting_broker import BacktestingBroker
+    from src.brokers.ForexLeverage import ForexLeverage
 
     print(f"DEBUG: Imports successful for {symbol}")
 
@@ -136,24 +160,30 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     
     print(f"DEBUG: DataFrame created for {symbol} with {len(df)} rows")
     
-    # Create minimal cerebro setup
-    cerebro = bt.Cerebro()
+    # Create cerebro setup exactly like the backtest
+    cerebro = bt.Cerebro(stdstats=False)
+    
+    # Set up data_indicators like the backtest
+    cerebro.data_indicators = {}
+    cerebro.data_state = {}
+    cerebro.broker.addcommissioninfo(ForexLeverage())
     
     # Use PandasData with proper datetime column
     data = bt.feeds.PandasData(dataname=df, datetime='datetime')
-    cerebro.adddata(data)
+    data._name = symbol
+    cerebro.adddata(data, name=symbol)
     
-    # Add the BreakoutIndicator (same as backtesting)
-    cerebro.addindicator(BreakoutIndicator, symbol=symbol)
+    # Add the BreakRetestStrategy (same as backtest)
+    cerebro.addstrategy(BreakRetestStrategy, symbol=symbol, rr=Config.rr)
     
     print(f"DEBUG: About to run cerebro for {symbol}")
     
     # Run to calculate indicators
-    results = cerebro.run(runonce=True)
+    results = cerebro.run()
     
     print(f"DEBUG: Cerebro run completed for {symbol}, results: {len(results)}")
     
-    # Extract zones from the BreakoutIndicator (same way as backtest)
+    # Extract zones exactly like the backtest does
     zones = {"supportSegments": [], "resistanceSegments": []}
     
     # Debug: Check what indicators we have
@@ -163,179 +193,46 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
         print(f"DEBUG Strategy: {symbol} - data_indicators type: {type(cerebro.data_indicators)}")
         print(f"DEBUG Strategy: {symbol} - data_indicators content: {cerebro.data_indicators}")
         
-    if hasattr(cerebro, 'indicators'):
-        print(f"DEBUG Strategy: {symbol} - cerebro indicators count: {len(cerebro.indicators)}")
-        if len(cerebro.indicators) > 0:
-            indicator_tuple = cerebro.indicators[0]
-            print(f"DEBUG Strategy: {symbol} - indicator type: {type(indicator_tuple)}")
-            
-            # Extract the actual indicator from the tuple
-            if isinstance(indicator_tuple, tuple) and len(indicator_tuple) > 0:
-                indicator = indicator_tuple[0]
-                print(f"DEBUG Strategy: {symbol} - actual indicator type: {type(indicator)}")
-                if hasattr(indicator, 'lines'):
-                    print(f"DEBUG Strategy: {symbol} - indicator lines: {[line for line in dir(indicator.lines) if not line.startswith('_')]}")
-            else:
-                indicator = indicator_tuple
-                if hasattr(indicator, 'lines'):
-                    print(f"DEBUG Strategy: {symbol} - indicator lines: {[line for line in dir(indicator.lines) if not line.startswith('_')]}")
-    
-    print(f"DEBUG Strategy: {symbol} - results count: {len(results)}")
-    if results and len(results) > 0:
-        strategy = results[0]
-        print(f"DEBUG Strategy: {symbol} - strategy has getindicators: {hasattr(strategy, 'getindicators')}")
-        if hasattr(strategy, 'getindicators'):
-            indicators = strategy.getindicators()
-            print(f"DEBUG Strategy: {symbol} - strategy indicators count: {len(indicators)}")
-            if len(indicators) > 0:
-                indicator = indicators[0]
-                print(f"DEBUG Strategy: {symbol} - strategy indicator type: {type(indicator)}")
-                print(f"DEBUG Strategy: {symbol} - strategy indicator lines: {[line for line in dir(indicator.lines) if not line.startswith('_')]}")
-    
-    # Try to get indicator from cerebro.indicators (direct access)
-    try:
-        print(f"DEBUG Strategy: {symbol} - About to check cerebro.indicators")
-        if hasattr(cerebro, 'indicators') and len(cerebro.indicators) > 0:
-            print(f"DEBUG Strategy: {symbol} - Using cerebro.indicators")
-            indicator_tuple = cerebro.indicators[0]
-            print(f"DEBUG Strategy: {symbol} - indicator tuple: {indicator_tuple}")
-            print(f"DEBUG Strategy: {symbol} - indicator tuple type: {type(indicator_tuple)}")
-            print(f"DEBUG Strategy: {symbol} - indicator tuple length: {len(indicator_tuple)}")
-            
-            # cerebro.indicators returns (indicator, lines) tuple
-            if isinstance(indicator_tuple, tuple) and len(indicator_tuple) > 0:
-                breakout = indicator_tuple[0]  # Get the actual indicator
-                print(f"DEBUG Strategy: {symbol} - actual indicator type: {type(breakout)}")
-            else:
-                breakout = indicator_tuple
+        # Try to extract zones exactly like the backtest
+        try:
+            if hasattr(cerebro, "data_indicators"):
+                indicators = cerebro.data_indicators.get(0)  # symbol_index 0
+                print(f"DEBUG Strategy: {symbol} - indicators from data_indicators: {type(indicators)}")
+                breakout = indicators.get("breakout") if indicators else None
+                print(f"DEBUG Strategy: {symbol} - breakout from data_indicators: {type(breakout)}")
                 
-            print(f"DEBUG Strategy: {symbol} - breakout has lines: {hasattr(breakout, 'lines')}")
-            if hasattr(breakout, 'lines'):
-                print(f"DEBUG Strategy: {symbol} - breakout.lines has resistance1: {hasattr(breakout.lines, 'resistance1')}")
-                print(f"DEBUG Strategy: {symbol} - breakout.lines has support1: {hasattr(breakout.lines, 'support1')}")
-                
-            if hasattr(breakout, 'lines') and hasattr(breakout.lines, 'resistance1') and hasattr(breakout.lines, 'support1'):
-                import numpy as np
-                res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
-                sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
-                zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
-                zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
-                
-                print(f"DEBUG Strategy: {symbol} - Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from cerebro.indicators")
-                if zones['supportSegments']:
-                    print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
-                if zones['resistanceSegments']:
-                    print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
-                
-                return zones
-            else:
-                print(f"DEBUG Strategy: {symbol} - Missing required attributes on breakout indicator")
-        else:
-            print(f"DEBUG Strategy: {symbol} - No cerebro.indicators found")
-    except Exception as e:
-        print(f"Warning: cerebro.indicators extraction failed: {e}")
-        import traceback
-        traceback.print_exc()
-        # Fall back to manual extraction
-        pass
+                if breakout is not None:
+                    import numpy as np
+                    res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
+                    sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
+                    
+                    print(f"DEBUG Strategy: {symbol} - resistance1 array length: {len(res_vals)}")
+                    print(f"DEBUG Strategy: {symbol} - support1 array length: {len(sup_vals)}")
+                    print(f"DEBUG Strategy: {symbol} - Sample resistance values: {res_vals[:10]}")
+                    print(f"DEBUG Strategy: {symbol} - Sample support values: {sup_vals[:10]}")
+                    
+                    # Check if all values are NaN
+                    if np.all(np.isnan(res_vals)) and np.all(np.isnan(sup_vals)):
+                        print(f"DEBUG Strategy: {symbol} - All values are NaN, using fallback")
+                        return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
+                    
+                    zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
+                    zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
+                    
+                    print(f"DEBUG Strategy: {symbol} - Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from BreakoutIndicator")
+                    if zones['supportSegments']:
+                        print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
+                    if zones['resistanceSegments']:
+                        print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
+                    
+                    return zones
+        except Exception as e:
+            print(f"Warning: data_indicators extraction failed: {e}")
+            import traceback
+            traceback.print_exc()
     
-    # Try to get indicator from strategy.getindicators()
-    try:
-        if results and len(results) > 0:
-            strategy = results[0]
-            if hasattr(strategy, 'getindicators'):
-                print(f"DEBUG Strategy: {symbol} - Using strategy.getindicators()")
-                indicators = strategy.getindicators()
-                if len(indicators) > 0:
-                    breakout = indicators[0]
-                    print(f"DEBUG Strategy: {symbol} - breakout type: {type(breakout)}")
-                    print(f"DEBUG Strategy: {symbol} - breakout has lines: {hasattr(breakout, 'lines')}")
-                    if hasattr(breakout, 'lines'):
-                        print(f"DEBUG Strategy: {symbol} - breakout.lines has resistance1: {hasattr(breakout.lines, 'resistance1')}")
-                        print(f"DEBUG Strategy: {symbol} - breakout.lines has support1: {hasattr(breakout.lines, 'support1')}")
-                        
-                    if hasattr(breakout, 'lines') and hasattr(breakout.lines, 'resistance1') and hasattr(breakout.lines, 'support1'):
-                        import numpy as np
-                        print(f"DEBUG Strategy: {symbol} - resistance1 array length: {len(breakout.lines.resistance1.array)}")
-                        print(f"DEBUG Strategy: {symbol} - support1 array length: {len(breakout.lines.support1.array)}")
-                        
-                        res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
-                        sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
-                        
-                        print(f"DEBUG Strategy: {symbol} - Sample resistance values: {res_vals[:10]}")
-                        print(f"DEBUG Strategy: {symbol} - Sample support values: {sup_vals[:10]}")
-                        
-                        # Check if all values are NaN
-                        if np.all(np.isnan(res_vals)) and np.all(np.isnan(sup_vals)):
-                            print(f"DEBUG Strategy: {symbol} - All values are NaN, using fallback")
-                            return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
-                        
-                        zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
-                        zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
-                        
-                        print(f"DEBUG Strategy: {symbol} - Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from strategy.getindicators")
-                        if zones['supportSegments']:
-                            print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
-                        if zones['resistanceSegments']:
-                            print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
-                        
-                        return zones
-        else:
-            print(f"DEBUG Strategy: {symbol} - No strategy.getindicators found")
-    except Exception as e:
-        print(f"Warning: strategy.getindicators extraction failed: {e}")
-        import traceback
-        traceback.print_exc()
-        # Fall back to manual extraction
-        pass
-    
-    # Fallback: try to extract from strategy results
-    if results and len(results) > 0:
-      strategy = results[0]
-      
-      # Get indicators from the strategy
-      if hasattr(strategy, '_indicators') and len(strategy._indicators) > 0:
-        breakout_indicator = strategy._indicators[0]
-        
-        # Extract support and resistance values from the indicator lines
-        support_values = []
-        resistance_values = []
-        
-        for i in range(len(times_s)):
-          # Get support from support1 line
-          if i < len(breakout_indicator.lines.support1):
-            sup_val = breakout_indicator.lines.support1[i]
-            if not math.isnan(sup_val):
-              support_values.append(float(sup_val))
-            else:
-              support_values.append(float('nan'))
-          else:
-            support_values.append(float('nan'))
-          
-          # Get resistance from resistance1 line
-          if i < len(breakout_indicator.lines.resistance1):
-            res_val = breakout_indicator.lines.resistance1[i]
-            if not math.isnan(res_val):
-              resistance_values.append(float(res_val))
-            else:
-              resistance_values.append(float('nan'))
-          else:
-            resistance_values.append(float('nan'))
-        
-        # Convert to segments using the same logic as backtest
-        resistance_segments = _segments_from_constant_levels(times_s, resistance_values)
-        support_segments = _segments_from_constant_levels(times_s, support_values)
-        
-        print(f"DEBUG Strategy: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones from strategy")
-        if support_segments:
-          print(f"DEBUG Strategy: Sample support: {support_segments[0]}")
-        if resistance_segments:
-          print(f"DEBUG Strategy: Sample resistance: {resistance_segments[0]}")
-        
-        return {
-          'resistanceSegments': resistance_segments,
-          'supportSegments': support_segments,
-        }
+    print(f"DEBUG: Reached end of function for {symbol}")
+    return {'resistanceSegments': [], 'supportSegments': []}
     
   except Exception as e:
     # If strategy execution fails, use fallback
@@ -343,9 +240,6 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     import traceback
     traceback.print_exc()
     return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
-  
-  print(f"DEBUG: Reached end of function for {symbol}")
-  return {'resistanceSegments': [], 'supportSegments': []}
 
 
 def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
