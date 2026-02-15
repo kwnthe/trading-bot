@@ -462,7 +462,11 @@ def main() -> int:
         # Get zones from strategy indicators for consistency
         zones = _get_zones_from_strategy(times_s, highs, lows, closes, sym, default_lookback)
         
-        # Convert to new chart data format for consistency with backtesting
+        support_segments = zones.get('supportSegments', [])
+        resistance_segments = zones.get('resistanceSegments', [])
+
+        # Convert to new chart data format for consistency with backtesting.
+        # Include nested structure (zones, indicators) so frontend chartData.zones.support / chartData.indicators.ema work.
         chart_data = {
             'ema': {
                 'data_type': 'ema',
@@ -470,27 +474,37 @@ def main() -> int:
                 'points': ema
             },
             'support': {
-                'data_type': 'support', 
+                'data_type': 'support',
                 'metadata': {},
-                'points': zones.get('supportSegments', [])
+                'points': support_segments
             },
             'resistance': {
                 'data_type': 'resistance',
                 'metadata': {},
-                'points': zones.get('resistanceSegments', [])
+                'points': resistance_segments
             },
             'markers': {
                 'data_type': 'marker',
                 'metadata': {},
                 'points': []  # Will be populated by live trading events
-            }
+            },
+            # Frontend expects chartData.zones.support / chartData.zones.resistance (array of { startTime, endTime, value })
+            'zones': {
+                'support': support_segments,
+                'resistance': resistance_segments,
+            },
+            # Frontend expects chartData.indicators.ema (array of { time, value })
+            'indicators': {
+                'ema': ema,
+            },
         }
-        
+
         out_symbols[sym] = {
           'candles': candles,
           'ema': ema,  # Keep for backward compatibility
           'zones': zones,  # Keep for backward compatibility
-          'chart_data': chart_data,  # New structured format
+          'chart_data': chart_data,  # snake_case (API returns as-is)
+          'chartData': chart_data,   # camelCase for frontend sym.chartData
           'markers': [],  # Keep for backward compatibility
           'orderBoxes': [],
         }
