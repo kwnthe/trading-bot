@@ -160,7 +160,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     
     from src.strategies.BreakRetestStrategy import BreakRetestStrategy
     from src.brokers.backtesting_broker import BacktestingBroker
-    from src.brokers.ForexLeverage import ForexLeverage
+    from web_app.backtests.runner.live_data_manager import LiveDataManager
     from indicators.BreakoutIndicator import BreakoutIndicator  # Match main.py pattern
     from indicators.BreakRetestIndicator import BreakRetestIndicator  # Match main.py pattern
 
@@ -221,69 +221,74 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     
     print(f"DEBUG: data_indicators populated for {symbol}: {list(cerebro.data_indicators[0].keys())}")
     
-    # Add indicators directly to cerebro for calculation
-    print(f"DEBUG: Adding indicators to cerebro for {symbol}")
-    cerebro.addindicator(BreakoutIndicator, symbol=symbol)
+    # The key insight: we need to add the indicators to cerebro AND connect them to data_indicators
+    # This ensures they're actually calculated during the run
+    
+    # Add the indicators to cerebro so they get calculated
+    breakout_indicator = cerebro.addindicator(BreakoutIndicator, symbol=symbol)
+    
+    # Create a simple strategy that just runs to trigger indicator calculation
+    class MinimalStrategy(bt.Strategy):
+        def next(self):
+            pass  # Do nothing, just run to calculate indicators
+    
+    cerebro.addstrategy(MinimalStrategy)
     
     print(f"DEBUG: Running cerebro to calculate indicators for {symbol}")
     
-    # Run cerebro to calculate indicators
-    results = cerebro.run(runonce=True, preload=True)
+    # Run cerebro to calculate the indicators
+    results = cerebro.run()
     
     print(f"DEBUG: Cerebro run completed for {symbol}, results: {len(results)}")
+    
+    # Now the breakout_indicator should have the calculated values
+    print(f"DEBUG: Extracting from calculated indicator for {symbol}")
     
     # Extract zones exactly like the backtest does
     zones = {"supportSegments": [], "resistanceSegments": []}
     
-    # Extract zones from cerebro.indicators first (since we added them there)
+    # Extract zones from the calculated indicator in cerebro.indicators first
     if hasattr(cerebro, 'indicators') and len(cerebro.indicators) > 0:
-        print(f"DEBUG Strategy: {symbol} - Extracting from cerebro.indicators")
-        print(f"DEBUG Strategy: {symbol} - indicators length: {len(cerebro.indicators)}")
-        
+        print(f"DEBUG Strategy: {symbol} - Extracting from calculated cerebro.indicators")
         try:
-            # Find the BreakoutIndicator in the indicators list
-            for idx, indicator_tuple in enumerate(cerebro.indicators):
-                print(f"DEBUG Strategy: {symbol} - indicator {idx} type: {type(indicator_tuple)}")
-                if isinstance(indicator_tuple, tuple) and len(indicator_tuple) >= 1:
-                    indicator_instance = indicator_tuple[0]
-                    print(f"DEBUG Strategy: {symbol} - indicator_instance {idx} type: {type(indicator_instance)}")
+            # Get the BreakoutIndicator we added
+            indicator_tuple = cerebro.indicators[0]
+            if isinstance(indicator_tuple, tuple) and len(indicator_tuple) >= 1:
+                breakout_calc = indicator_tuple[0]
+                print(f"DEBUG Strategy: {symbol} - calculated indicator type: {type(breakout_calc)}")
+                
+                if hasattr(breakout_calc, 'lines') and hasattr(breakout_calc.lines, 'resistance1'):
+                    import numpy as np
+                    res_vals = np.asarray(breakout_calc.lines.resistance1.array, dtype=float)
+                    sup_vals = np.asarray(breakout_calc.lines.support1.array, dtype=float)
                     
-                    # Check if this is our BreakoutIndicator
-                    if 'BreakoutIndicator' in str(type(indicator_instance)):
-                        print(f"DEBUG Strategy: {symbol} - Found BreakoutIndicator at index {idx}")
+                    print(f"DEBUG Strategy: {symbol} - resistance1 array length: {len(res_vals)}")
+                    print(f"DEBUG Strategy: {symbol} - support1 array length: {len(sup_vals)}")
+                    print(f"DEBUG Strategy: {symbol} - Sample resistance values: {res_vals[:10]}")
+                    print(f"DEBUG Strategy: {symbol} - Sample support values: {sup_vals[:10]}")
+                    
+                    # Check if we have real values
+                    if len(res_vals) > 0 and len(sup_vals) > 0 and not (np.all(np.isnan(res_vals)) and np.all(np.isnan(sup_vals))):
+                        zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
+                        zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
                         
-                        import numpy as np
-                        res_vals = np.asarray(indicator_instance.lines.resistance1.array, dtype=float)
-                        sup_vals = np.asarray(indicator_instance.lines.support1.array, dtype=float)
+                        print(f"DEBUG Strategy: {symbol} - SUCCESS: Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from calculated BreakoutIndicator")
+                        if zones['supportSegments']:
+                            print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
+                        if zones['resistanceSegments']:
+                            print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
                         
-                        print(f"DEBUG Strategy: {symbol} - resistance1 array length: {len(res_vals)}")
-                        print(f"DEBUG Strategy: {symbol} - support1 array length: {len(sup_vals)}")
-                        print(f"DEBUG Strategy: {symbol} - Sample resistance values: {res_vals[:10]}")
-                        print(f"DEBUG Strategy: {symbol} - Sample support values: {sup_vals[:10]}")
-                        
-                        # Check if we have real values
-                        if len(res_vals) > 0 and len(sup_vals) > 0 and not (np.all(np.isnan(res_vals)) and np.all(np.isnan(sup_vals))):
-                            zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
-                            zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
-                            
-                            print(f"DEBUG Strategy: {symbol} - SUCCESS: Generated {len(zones['supportSegments'])} support, {len(zones['resistanceSegments'])} resistance zones from BreakoutIndicator")
-                            if zones['supportSegments']:
-                                print(f"DEBUG Strategy: Sample support: {zones['supportSegments'][0]}")
-                            if zones['resistanceSegments']:
-                                print(f"DEBUG Strategy: Sample resistance: {zones['resistanceSegments'][0]}")
-                            
-                            return zones
-                        else:
-                            print(f"DEBUG Strategy: {symbol} - BreakoutIndicator arrays are empty or NaN")
-                        break
+                        return zones
+                    else:
+                        print(f"DEBUG Strategy: {symbol} - Calculated indicator arrays are empty or NaN")
         except Exception as e:
-            print(f"Warning: cerebro.indicators extraction failed: {e}")
+            print(f"Warning: calculated indicator extraction failed: {e}")
             import traceback
             traceback.print_exc()
     
     # Fallback to data_indicators approach
     if hasattr(cerebro, 'data_indicators'):
-        print(f"DEBUG Strategy: {symbol} - Fallback to data_indicators")
+        print(f"DEBUG Strategy: {symbol} - Extracting from data_indicators")
         print(f"DEBUG Strategy: {symbol} - data_indicators type: {type(cerebro.data_indicators)}")
         print(f"DEBUG Strategy: {symbol} - data_indicators content keys: {list(cerebro.data_indicators.keys())}")
         
@@ -604,7 +609,13 @@ def main() -> int:
         }
 
       out_symbols: dict[str, Any] = {}
+      live_data_managers: dict[str, LiveDataManager] = {}
+      
       for sym in symbols:
+        # Initialize LiveDataManager for each symbol
+        live_data_managers[sym] = LiveDataManager(sym, timeframe_str)
+        print(f"DEBUG: Initialized LiveDataManager for {sym} with UUID: {live_data_managers[sym].uuid}")
+        
         rates = mt5.copy_rates_from_pos(sym, tf, 0, int(args.max_candles))
         candles = []
         times_s: list[int] = []
@@ -692,6 +703,27 @@ def main() -> int:
             print(f"DEBUG Final: Sample support zone format: {zones['supportSegments'][0]}")
         if zones['resistanceSegments']:
             print(f"DEBUG Final: Sample resistance zone format: {zones['resistanceSegments'][0]}")
+        
+        # Update LiveDataManager with all the processed data
+        live_data_manager = live_data_managers[sym]
+        live_data_manager.update_from_live_runner_output(out_symbols[sym])
+        
+        # Add some example extensions to demonstrate flexibility
+        live_data_manager.add_event({
+            "time": int(time.time()),
+            "type": "data_update",
+            "symbol": sym,
+            "candles_count": len(candles),
+            "zones_count": len(zones['supportSegments']) + len(zones['resistanceSegments'])
+        })
+        
+        # Save to file
+        live_data_manager.save()
+        print(f"DEBUG: Saved live data for {sym} to {live_data_manager.get_file_path()}")
+        
+        # Show summary
+        summary = live_data_manager.get_summary()
+        print(f"DEBUG: {sym} Summary - UUID: {summary['uuid']}, Candles: {summary['candles_count']}, Support Zones: {summary['support_zones_count']}, Resistance Zones: {summary['resistance_zones_count']}")
 
       latest_seq += 1
       snapshot = {
