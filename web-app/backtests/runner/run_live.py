@@ -264,6 +264,28 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
             if self.bar_count < self.warmup_bars:
                 return
                 
+            # CRITICAL: Connect strategy to data_indicators like BaseStrategy does
+            if not hasattr(self, 'data_indicators'):
+                self.data_indicators = {}
+                self.data_state = {}
+                self.candle_data = {}
+                self.chart_markers = {}
+            
+            # Populate data_indicators if not already done
+            if 0 not in self.data_indicators:
+                original_data_index = 0
+                actual_data_feed = self.datas[0]
+                self.data_indicators[original_data_index] = {
+                    'breakout': BreakoutIndicator(actual_data_feed, symbol=symbol),
+                    'break_retest': BreakRetestIndicator(actual_data_feed, symbol=symbol),
+                    'atr': bt.indicators.ATR(actual_data_feed, period=Config.atr_length),
+                    'ema': bt.indicators.EMA(actual_data_feed.close, period=Config.ema_length),
+                    'volume_ma': bt.indicators.SMA(actual_data_feed.volume, period=Config.volume_ma_length),
+                    'rsi': bt.indicators.RSI(actual_data_feed.close, period=14),
+                    'symbol': symbol,
+                    'data': actual_data_feed
+                }
+            
             # Access the breakout indicator to ensure it's calculated
             try:
                 if hasattr(self, 'data_indicators') and 0 in self.data_indicators:
@@ -272,8 +294,20 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                         # Just access the lines to ensure they're calculated
                         _ = breakout.lines.support1[0]
                         _ = breakout.lines.resistance1[0]
-            except:
-                pass  # Ignore errors during calculation
+                        
+                        # Debug: Check if arrays have values
+                        import numpy as np
+                        res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
+                        sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
+                        
+                        if self.bar_count == self.warmup_bars + 1:  # Only print once
+                            print(f"DEBUG Strategy: {symbol} - After warm-up, resistance1 array length: {len(res_vals)}")
+                            print(f"DEBUG Strategy: {symbol} - After warm-up, support1 array length: {len(sup_vals)}")
+                            if len(res_vals) > 0 and len(sup_vals) > 0:
+                                print(f"DEBUG Strategy: {symbol} - SUCCESS: BreakoutIndicator has values!")
+            except Exception as e:
+                if self.bar_count == self.warmup_bars + 1:  # Only print once
+                    print(f"DEBUG Strategy: {symbol} - Error accessing indicator: {e}")
     
     # Add the zone extraction strategy
     cerebro.addstrategy(ZoneExtractionStrategy)
