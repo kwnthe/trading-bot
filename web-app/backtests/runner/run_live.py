@@ -249,18 +249,18 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     print(f"DEBUG: data_indicators populated for {symbol}: {list(cerebro.data_indicators[0].keys())}")
     
     # The key insight: we need to run the actual strategy to populate BreakoutIndicator arrays
-    # Use the existing data_indicators instead of creating new ones
+    # Use much longer warm-up period and better error handling
     
     class ZoneExtractionStrategy(bt.Strategy):
         def __init__(self):
             super().__init__()
             self.bar_count = 0
-            self.warmup_bars = 60  # Give it enough time to warm up
+            self.warmup_bars = 200  # Much longer warm-up period for BreakoutIndicator
             
         def next(self):
             self.bar_count += 1
             
-            # Only try to access indicators after warm-up period
+            # Only try to access indicators after very long warm-up period
             if self.bar_count < self.warmup_bars:
                 return
                 
@@ -276,20 +276,25 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
                 if hasattr(self, 'data_indicators') and 0 in self.data_indicators:
                     breakout = self.data_indicators[0].get('breakout')
                     if breakout is not None:
-                        # Just access the lines to ensure they're calculated
-                        _ = breakout.lines.support1[0]
-                        _ = breakout.lines.resistance1[0]
-                        
-                        # Debug: Check if arrays have values
-                        import numpy as np
-                        res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
-                        sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
-                        
-                        if self.bar_count == self.warmup_bars + 1:  # Only print once
-                            print(f"DEBUG Strategy: {symbol} - After warm-up, resistance1 array length: {len(res_vals)}")
-                            print(f"DEBUG Strategy: {symbol} - After warm-up, support1 array length: {len(sup_vals)}")
-                            if len(res_vals) > 0 and len(sup_vals) > 0:
-                                print(f"DEBUG Strategy: {symbol} - SUCCESS: BreakoutIndicator has values!")
+                        # Check if we have enough data before accessing
+                        if len(breakout.lines.resistance1.array) > 0 and len(breakout.lines.support1.array) > 0:
+                            # Access the lines to ensure they're calculated
+                            _ = breakout.lines.support1[0]
+                            _ = breakout.lines.resistance1[0]
+                            
+                            # Debug: Check if arrays have values
+                            import numpy as np
+                            res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
+                            sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
+                            
+                            if self.bar_count == self.warmup_bars + 1:  # Only print once
+                                print(f"DEBUG Strategy: {symbol} - After warm-up, resistance1 array length: {len(res_vals)}")
+                                print(f"DEBUG Strategy: {symbol} - After warm-up, support1 array length: {len(sup_vals)}")
+                                if len(res_vals) > 0 and len(sup_vals) > 0:
+                                    print(f"DEBUG Strategy: {symbol} - SUCCESS: BreakoutIndicator has values!")
+                        else:
+                            if self.bar_count == self.warmup_bars + 1:  # Only print once
+                                print(f"DEBUG Strategy: {symbol} - BreakoutIndicator arrays still empty after warm-up")
             except Exception as e:
                 if self.bar_count == self.warmup_bars + 1:  # Only print once
                     print(f"DEBUG Strategy: {symbol} - Error accessing indicator: {e}")
