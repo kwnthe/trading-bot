@@ -33,15 +33,32 @@ def cors_response(data, status=200):
 def live_data_serve(request, uuid):
     """Serve the unified JSON data file for a specific UUID"""
     try:
-        # Get the project root - handle Windows paths properly
-        project_root = Path(__file__).resolve().parent.parent.parent
-        data_file = project_root / "var" / "live" / str(uuid) / "data.json"
+        # Try multiple possible paths for different environments
+        possible_paths = [
+            # Windows path (where live runner creates files)
+            Path(__file__).resolve().parent.parent / "var" / "live" / str(uuid) / "data.json",
+            # Mac/Linux path (fallback)
+            Path(__file__).resolve().parent.parent.parent / "var" / "live" / str(uuid) / "data.json",
+            # Alternative Windows path
+            Path(__file__).resolve().parent.parent.parent.parent / "web-app" / "var" / "live" / str(uuid) / "data.json",
+        ]
         
-        print(f"DEBUG: Looking for data file at: {data_file}")
-        print(f"DEBUG: File exists: {data_file.exists()}")
+        data_file = None
+        for path in possible_paths:
+            if path.exists():
+                data_file = path
+                break
         
-        if not data_file.exists():
-            return cors_json_response({"error": "Data file not found", "uuid": str(uuid), "path": str(data_file)}, status=404)
+        if data_file is None:
+            # Return error with all attempted paths for debugging
+            attempted_paths = [str(p) for p in possible_paths]
+            return cors_json_response({
+                "error": "Data file not found", 
+                "uuid": str(uuid), 
+                "attempted_paths": attempted_paths
+            }, status=404)
+        
+        print(f"DEBUG: Found data file at: {data_file}")
         
         # Serve the JSON file
         with open(data_file, 'r') as f:
@@ -112,11 +129,26 @@ def live_data_extension(request, uuid, extension_type):
 def live_data_sessions(request):
     """List all active live data sessions"""
     try:
-        project_root = Path(__file__).resolve().parent.parent.parent
-        live_dir = project_root / "var" / "live"
+        # Try multiple possible paths for different environments
+        possible_live_dirs = [
+            # Windows path (where live runner creates files)
+            Path(__file__).resolve().parent.parent / "var" / "live",
+            # Mac/Linux path (fallback)
+            Path(__file__).resolve().parent.parent.parent / "var" / "live",
+            # Alternative Windows path
+            Path(__file__).resolve().parent.parent.parent.parent / "web-app" / "var" / "live",
+        ]
         
-        if not live_dir.exists():
-            return cors_json_response({"sessions": []})
+        live_dir = None
+        for path in possible_live_dirs:
+            if path.exists():
+                live_dir = path
+                break
+        
+        if live_dir is None:
+            return cors_json_response({"sessions": [], "attempted_paths": [str(p) for p in possible_live_dirs]})
+        
+        print(f"DEBUG: Found live directory at: {live_dir}")
         
         sessions = []
         for uuid_dir in live_dir.iterdir():
