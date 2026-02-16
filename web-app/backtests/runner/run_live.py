@@ -22,6 +22,17 @@ except ImportError:
         LiveDataManager = None
         print("Warning: LiveDataManager not available, live data features disabled")
 
+# Import ForexLeverage at module level
+try:
+    from src.brokers.ForexLeverage import ForexLeverage
+except ImportError:
+    # Fallback for different import paths
+    try:
+        from brokers.ForexLeverage import ForexLeverage
+    except ImportError:
+        ForexLeverage = None
+        print("Warning: ForexLeverage not available, using default broker")
+
 
 def _write_json(path: Path, payload: Any) -> None:
   # On Windows, os.replace() can temporarily fail with PermissionError if another
@@ -195,7 +206,13 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     cerebro.data_state = {}
     cerebro.candle_data = {}
     cerebro.chart_markers = {}
-    cerebro.broker.addcommissioninfo(ForexLeverage())
+    
+    # Add commission info if ForexLeverage is available
+    if ForexLeverage is not None:
+        cerebro.broker.addcommissioninfo(ForexLeverage())
+        print(f"DEBUG: Added ForexLeverage commission info for {symbol}")
+    else:
+        print(f"DEBUG: ForexLeverage not available, using default broker commission for {symbol}")
     
     # Use PandasData with proper datetime column
     data = bt.feeds.PandasData(dataname=df, datetime='datetime')
