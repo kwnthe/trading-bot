@@ -33,12 +33,15 @@ def cors_response(data, status=200):
 def live_data_serve(request, uuid):
     """Serve the unified JSON data file for a specific UUID"""
     try:
-        # Get the project root - adjust path as needed
+        # Get the project root - handle Windows paths properly
         project_root = Path(__file__).resolve().parent.parent.parent
-        data_file = project_root / "var" / "live" / uuid / "data.json"
+        data_file = project_root / "var" / "live" / str(uuid) / "data.json"
+        
+        print(f"DEBUG: Looking for data file at: {data_file}")
+        print(f"DEBUG: File exists: {data_file.exists()}")
         
         if not data_file.exists():
-            return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
+            return cors_json_response({"error": "Data file not found", "uuid": str(uuid), "path": str(data_file)}, status=404)
         
         # Serve the JSON file
         with open(data_file, 'r') as f:
@@ -47,13 +50,16 @@ def live_data_serve(request, uuid):
         return cors_json_response(data)
         
     except Exception as e:
+        print(f"DEBUG: Error in live_data_serve: {e}")
+        import traceback
+        traceback.print_exc()
         return cors_json_response({"error": str(e), "uuid": str(uuid)}, status=500)
 
 def live_data_summary(request, uuid):
     """Get summary of live data for a specific UUID"""
     try:
         project_root = Path(__file__).resolve().parent.parent.parent
-        data_file = project_root / "var" / "live" / uuid / "data.json"
+        data_file = project_root / "var" / "live" / str(uuid) / "data.json"
         
         if not data_file.exists():
             return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
@@ -86,7 +92,7 @@ def live_data_extension(request, uuid, extension_type):
     """Get specific extension data for a UUID"""
     try:
         project_root = Path(__file__).resolve().parent.parent.parent
-        data_file = project_root / "var" / "live" / uuid / "data.json"
+        data_file = project_root / "var" / "live" / str(uuid) / "data.json"
         
         if not data_file.exists():
             return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
@@ -147,7 +153,7 @@ def live_data_cleanup(request, uuid):
     """Clean up old data for a specific UUID"""
     try:
         project_root = Path(__file__).resolve().parent.parent.parent
-        data_file = project_root / "var" / "live" / uuid / "data.json"
+        data_file = project_root / "var" / "live" / str(uuid) / "data.json"
         
         if not data_file.exists():
             return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
@@ -188,7 +194,7 @@ def live_data_add_marker(request, uuid):
         
         # Load existing data
         project_root = Path(__file__).resolve().parent.parent.parent
-        data_file = project_root / "var" / "live" / uuid / "data.json"
+        data_file = project_root / "var" / "live" / str(uuid) / "data.json"
         
         if not data_file.exists():
             return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
