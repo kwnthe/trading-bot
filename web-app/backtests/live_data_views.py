@@ -11,6 +11,25 @@ from django.utils.decorators import method_decorator
 from .runner.live_data_manager import LiveDataManager
 import traceback
 
+def cors_json_response(data, status=200):
+    """Helper function to add CORS headers to JSON responses"""
+    response = JsonResponse(data, status=status)
+    response["Access-Control-Allow-Origin"] = "*"
+    response["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
+
+def cors_response(data, status=200):
+    """Helper function to add CORS headers to any response"""
+    if isinstance(data, str):
+        response = HttpResponse(data, status=status)
+    else:
+        response = JsonResponse(data, status=status)
+    response["Access-Control-Allow-Origin"] = "*"
+    response["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
+
 def live_data_serve(request, uuid):
     """Serve the unified JSON data file for a specific UUID"""
     try:
@@ -19,16 +38,16 @@ def live_data_serve(request, uuid):
         data_file = project_root / "var" / "live" / uuid / "data.json"
         
         if not data_file.exists():
-            return JsonResponse({"error": "Data file not found", "uuid": str(uuid)}, status=404)
+            return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
         
         # Serve the JSON file
         with open(data_file, 'r') as f:
             data = json.load(f)
         
-        return JsonResponse(data)
+        return cors_json_response(data)
         
     except Exception as e:
-        return JsonResponse({"error": str(e), "uuid": str(uuid)}, status=500)
+        return cors_json_response({"error": str(e), "uuid": str(uuid)}, status=500)
 
 def live_data_summary(request, uuid):
     """Get summary of live data for a specific UUID"""
@@ -37,7 +56,7 @@ def live_data_summary(request, uuid):
         data_file = project_root / "var" / "live" / uuid / "data.json"
         
         if not data_file.exists():
-            return JsonResponse({"error": "Data file not found", "uuid": str(uuid)}, status=404)
+            return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
         
         with open(data_file, 'r') as f:
             data = json.load(f)
@@ -58,10 +77,10 @@ def live_data_summary(request, uuid):
             "file_size": data_file.stat().st_size
         }
         
-        return JsonResponse(summary)
+        return cors_json_response(summary)
         
     except Exception as e:
-        return JsonResponse({"error": str(e), "uuid": str(uuid)}, status=500)
+        return cors_json_response({"error": str(e), "uuid": str(uuid)}, status=500)
 
 def live_data_extension(request, uuid, extension_type):
     """Get specific extension data for a UUID"""
@@ -70,19 +89,19 @@ def live_data_extension(request, uuid, extension_type):
         data_file = project_root / "var" / "live" / uuid / "data.json"
         
         if not data_file.exists():
-            return JsonResponse({"error": "Data file not found", "uuid": str(uuid)}, status=404)
+            return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
         
         with open(data_file, 'r') as f:
             data = json.load(f)
         
         extensions = data.get("extensions", {})
         if extension_type not in extensions:
-            return JsonResponse({"error": f"Extension '{extension_type}' not found", "uuid": str(uuid)}, status=404)
+            return cors_json_response({"error": f"Extension '{extension_type}' not found", "uuid": str(uuid)}, status=404)
         
-        return JsonResponse(extensions[extension_type])
+        return cors_json_response(extensions[extension_type])
         
     except Exception as e:
-        return JsonResponse({"error": str(e), "uuid": str(uuid)}, status=500)
+        return cors_json_response({"error": str(e), "uuid": str(uuid)}, status=500)
 
 def live_data_sessions(request):
     """List all active live data sessions"""
@@ -91,7 +110,7 @@ def live_data_sessions(request):
         live_dir = project_root / "var" / "live"
         
         if not live_dir.exists():
-            return JsonResponse({"sessions": []})
+            return cors_json_response({"sessions": []})
         
         sessions = []
         for uuid_dir in live_dir.iterdir():
@@ -117,10 +136,10 @@ def live_data_sessions(request):
         # Sort by last_updated (most recent first)
         sessions.sort(key=lambda x: x["last_updated"], reverse=True)
         
-        return JsonResponse({"sessions": sessions})
+        return cors_json_response({"sessions": sessions})
         
     except Exception as e:
-        return JsonResponse({"error": str(e)}, status=500)
+        return cors_json_response({"error": str(e)}, status=500)
 
 @require_http_methods(["POST"])
 @csrf_exempt
@@ -131,7 +150,7 @@ def live_data_cleanup(request, uuid):
         data_file = project_root / "var" / "live" / uuid / "data.json"
         
         if not data_file.exists():
-            return JsonResponse({"error": "Data file not found", "uuid": str(uuid)}, status=404)
+            return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
         
         with open(data_file, 'r') as f:
             data = json.load(f)
@@ -146,10 +165,10 @@ def live_data_cleanup(request, uuid):
         manager.load()
         manager.cleanup_old_data(max_age_hours=24)
         
-        return JsonResponse({"message": "Cleanup completed", "uuid": str(uuid)})
+        return cors_json_response({"message": "Cleanup completed", "uuid": str(uuid)})
         
     except Exception as e:
-        return JsonResponse({"error": str(e), "uuid": str(uuid)}, status=500)
+        return cors_json_response({"error": str(e), "uuid": str(uuid)}, status=500)
 
 @require_http_methods(["POST"])
 @csrf_exempt
@@ -160,19 +179,19 @@ def live_data_add_marker(request, uuid):
         try:
             data = json.loads(request.body)
         except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON in request body"}, status=400)
+            return cors_json_response({"error": "Invalid JSON in request body"}, status=400)
         
         required_fields = ["time", "value", "marker_type"]
         for field in required_fields:
             if field not in data:
-                return JsonResponse({"error": f"Missing required field: {field}"}, status=400)
+                return cors_json_response({"error": f"Missing required field: {field}"}, status=400)
         
         # Load existing data
         project_root = Path(__file__).resolve().parent.parent.parent
         data_file = project_root / "var" / "live" / uuid / "data.json"
         
         if not data_file.exists():
-            return JsonResponse({"error": "Data file not found", "uuid": str(uuid)}, status=404)
+            return cors_json_response({"error": "Data file not found", "uuid": str(uuid)}, status=404)
         
         symbol_data = json.load(data_file)
         symbol = symbol_data.get("metadata", {}).get("symbol", "Unknown")
@@ -193,7 +212,7 @@ def live_data_add_marker(request, uuid):
         
         manager.save()
         
-        return JsonResponse({"message": "Marker added successfully", "uuid": str(uuid)})
+        return cors_json_response({"message": "Marker added successfully", "uuid": str(uuid)})
         
     except Exception as e:
-        return JsonResponse({"error": str(e), "uuid": str(uuid)}, status=500)
+        return cors_json_response({"error": str(e), "uuid": str(uuid)}, status=500)
