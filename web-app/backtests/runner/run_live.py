@@ -249,7 +249,7 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     print(f"DEBUG: data_indicators populated for {symbol}: {list(cerebro.data_indicators[0].keys())}")
     
     # The key insight: we need to run the actual strategy to populate BreakoutIndicator arrays
-    # Use the same approach as the working backtest but with proper warm-up handling
+    # Use the existing data_indicators instead of creating new ones
     
     class ZoneExtractionStrategy(bt.Strategy):
         def __init__(self):
@@ -264,27 +264,12 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
             if self.bar_count < self.warmup_bars:
                 return
                 
-            # CRITICAL: Connect strategy to data_indicators like BaseStrategy does
+            # CRITICAL: Connect to cerebro's data_indicators that we already populated
             if not hasattr(self, 'data_indicators'):
-                self.data_indicators = {}
-                self.data_state = {}
-                self.candle_data = {}
-                self.chart_markers = {}
-            
-            # Populate data_indicators if not already done
-            if 0 not in self.data_indicators:
-                original_data_index = 0
-                actual_data_feed = self.datas[0]
-                self.data_indicators[original_data_index] = {
-                    'breakout': BreakoutIndicator(actual_data_feed, symbol=symbol),
-                    'break_retest': BreakRetestIndicator(actual_data_feed, symbol=symbol),
-                    'atr': bt.indicators.ATR(actual_data_feed, period=Config.atr_length),
-                    'ema': bt.indicators.EMA(actual_data_feed.close, period=Config.ema_length),
-                    'volume_ma': bt.indicators.SMA(actual_data_feed.volume, period=Config.volume_ma_length),
-                    'rsi': bt.indicators.RSI(actual_data_feed.close, period=14),
-                    'symbol': symbol,
-                    'data': actual_data_feed
-                }
+                self.data_indicators = cerebro.data_indicators
+                self.data_state = cerebro.data_state
+                self.candle_data = cerebro.candle_data
+                self.chart_markers = cerebro.chart_markers
             
             # Access the breakout indicator to ensure it's calculated
             try:
