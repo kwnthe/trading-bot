@@ -11,6 +11,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# Import LiveDataManager at module level
+try:
+    from web_app.backtests.runner.live_data_manager import LiveDataManager
+except ImportError:
+    # Fallback for different import paths
+    try:
+        from live_data_manager import LiveDataManager
+    except ImportError:
+        LiveDataManager = None
+        print("Warning: LiveDataManager not available, live data features disabled")
+
 
 def _write_json(path: Path, payload: Any) -> None:
   # On Windows, os.replace() can temporarily fail with PermissionError if another
@@ -160,7 +171,6 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
     
     from src.strategies.BreakRetestStrategy import BreakRetestStrategy
     from src.brokers.backtesting_broker import BacktestingBroker
-    from web_app.backtests.runner.live_data_manager import LiveDataManager
     from indicators.BreakoutIndicator import BreakoutIndicator  # Match main.py pattern
     from indicators.BreakRetestIndicator import BreakRetestIndicator  # Match main.py pattern
 
@@ -609,12 +619,19 @@ def main() -> int:
         }
 
       out_symbols: dict[str, Any] = {}
-      live_data_managers: dict[str, LiveDataManager] = {}
+      live_data_managers: dict[str, Any] = {}
+      
+      # Only use LiveDataManager if it's available
+      if LiveDataManager is not None:
+        print(f"DEBUG: LiveDataManager available, initializing for symbols")
+      else:
+        print(f"DEBUG: LiveDataManager not available, skipping live data features")
       
       for sym in symbols:
-        # Initialize LiveDataManager for each symbol
-        live_data_managers[sym] = LiveDataManager(sym, timeframe_str)
-        print(f"DEBUG: Initialized LiveDataManager for {sym} with UUID: {live_data_managers[sym].uuid}")
+        # Initialize LiveDataManager for each symbol if available
+        if LiveDataManager is not None:
+          live_data_managers[sym] = LiveDataManager(sym, timeframe_str)
+          print(f"DEBUG: Initialized LiveDataManager for {sym} with UUID: {live_data_managers[sym].uuid}")
         
         rates = mt5.copy_rates_from_pos(sym, tf, 0, int(args.max_candles))
         candles = []
@@ -704,26 +721,29 @@ def main() -> int:
         if zones['resistanceSegments']:
             print(f"DEBUG Final: Sample resistance zone format: {zones['resistanceSegments'][0]}")
         
-        # Update LiveDataManager with all the processed data
-        live_data_manager = live_data_managers[sym]
-        live_data_manager.update_from_live_runner_output(out_symbols[sym])
-        
-        # Add some example extensions to demonstrate flexibility
-        live_data_manager.add_event({
-            "time": int(time.time()),
-            "type": "data_update",
-            "symbol": sym,
-            "candles_count": len(candles),
-            "zones_count": len(zones['supportSegments']) + len(zones['resistanceSegments'])
-        })
-        
-        # Save to file
-        live_data_manager.save()
-        print(f"DEBUG: Saved live data for {sym} to {live_data_manager.get_file_path()}")
-        
-        # Show summary
-        summary = live_data_manager.get_summary()
-        print(f"DEBUG: {sym} Summary - UUID: {summary['uuid']}, Candles: {summary['candles_count']}, Support Zones: {summary['support_zones_count']}, Resistance Zones: {summary['resistance_zones_count']}")
+        # Update LiveDataManager with all the processed data (if available)
+        if LiveDataManager is not None and sym in live_data_managers:
+          live_data_manager = live_data_managers[sym]
+          live_data_manager.update_from_live_runner_output(out_symbols[sym])
+          
+          # Add some example extensions to demonstrate flexibility
+          live_data_manager.add_event({
+              "time": int(time.time()),
+              "type": "data_update",
+              "symbol": sym,
+              "candles_count": len(candles),
+              "zones_count": len(zones['supportSegments']) + len(zones['resistanceSegments'])
+          })
+          
+          # Save to file
+          live_data_manager.save()
+          print(f"DEBUG: Saved live data for {sym} to {live_data_manager.get_file_path()}")
+          
+          # Show summary
+          summary = live_data_manager.get_summary()
+          print(f"DEBUG: {sym} Summary - UUID: {summary['uuid']}, Candles: {summary['candles_count']}, Support Zones: {summary['support_zones_count']}, Resistance Zones: {summary['resistance_zones_count']}")
+        else:
+          print(f"DEBUG: LiveDataManager not available for {sym}, skipping file save")
 
       latest_seq += 1
       snapshot = {
