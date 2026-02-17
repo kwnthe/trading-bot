@@ -434,13 +434,16 @@ export default function BacktestFormPage() {
 
     const t = inputForFieldType(p.field_type)
     const value = params[p.name] ?? ''
+    const inputValue = p.field_type === 'datetime' && value ? 
+      (value.includes('T') ? value : value.replace(' ', 'T')) : value
+  
     return (
       <div key={p.name}>
         <div className="fieldLabel">{p.label}</div>
         <input
           className="input"
           type={t}
-          value={value}
+          value={inputValue}
           onChange={(e) => dispatch(setParam({ name: p.name, value: e.target.value }))}
         />
         {p.help_text ? <div className="help">{p.help_text}</div> : null}

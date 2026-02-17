@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CandlestickSeries,
+  BaselineSeries,
   LineSeries,
   createChart,
   CrosshairMode,
+  createSeriesMarkers,
+  type ISeriesMarkersPluginApi,
+  type SeriesMarker,
   type IChartApi,
   type ISeriesApi,
   type Time,
@@ -12,147 +16,570 @@ import {
 import { sortAndDedupByTime, toTime } from '../utils/timeSeries'
 import type { ResultJson } from '../api/types'
 
-type Line = ISeriesApi<'Line'>
-
 type Props = {
   result: ResultJson | null
   symbol: string
 }
 
+type Line = ISeriesApi<'Line'>
+
+const dedupPointsByTime = (pts: { time: Time; value: number }[]) => {
+  const m = new Map<number, { time: Time; value: number }>()
+  for (const p of pts) m.set(p.time as number, p)
+  return Array.from(m.values()).sort((a, b) => (a.time as number) - (b.time as number))
+}
+
+const toLocalTime = (time: Time, offsetHours = 3): Time => {
+  return ((time as number) + offsetHours * 3600) as Time
+}
+
+// ---------------- COOKIE HELPERS ----------------
+const setCookie = (name: string, value: string, days = 365) => {
+  const expires = new Date(Date.now() + days * 864e5).toUTCString()
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/`
+}
+
+const getCookie = (name: string) => {
+  return document.cookie.split('; ').reduce((r, v) => {
+    const parts = v.split('=')
+    return parts[0] === name ? decodeURIComponent(parts[1]) : r
+  }, '')
+}
+
 export default function BacktestChart({ result, symbol }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
-  const candlesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
-  const emaRef = useRef<Line | null>(null)
+
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const emaSeriesRef = useRef<Line | null>(null)
+  const tpPointsSeriesRef = useRef<Line | null>(null)
+  const slPointsSeriesRef = useRef<Line | null>(null)
+  const tpLabelSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const slLabelSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const zoneSeriesRef = useRef<Line[]>([])
+  const orderBoxSeriesRef = useRef<ISeriesApi<'Baseline'>[]>([])
+  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+  const tpMarkersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+  const slMarkersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+
   const didFitRef = useRef(false)
+  const [chartMountId, setChartMountId] = useState(0)
+  const exitFsTimerRef = useRef<number | null>(null)
+
+  const [showTpSlMarkers, setShowTpSlMarkers] = useState(() => {
+    return getCookie('showTpSlMarkers') === '' ? true : getCookie('showTpSlMarkers') === 'true'
+  })
+  // ---------- TOGGLE STATES ----------
+  const [isDark, setIsDark] = useState(() => {
+    const cookie = getCookie('chartTheme')
+    return cookie === '' ? true : cookie === 'dark'
+  })
+
+  const [useLocalTime, setUseLocalTime] = useState(() => {
+    const cookie = getCookie('useLocalTime')
+    return cookie === '' ? false : cookie === 'true'
+  })
+
+  const [showIndexes, setShowIndexes] = useState(() => {
+    return getCookie('candleIndexes') === 'true'
+  })
+
+  const [showTrades, setShowTrades] = useState(() => {
+    return getCookie('showTrades') === '' ? true : getCookie('showTrades') === 'true'
+  })
+
+  const theme = useMemo(() => isDark
+    ? {
+        background: '#0B0E11',
+        textColor: '#d1d4dc',
+        gridColor: '#1E222D',
+        borderColor: '#2A2E39',
+        crosshairColor: '#758696',
+        upColor: '#26a69a',
+        downColor: '#ef5350',
+      }
+    : {
+        background: '#ffffff',
+        textColor: '#191919',
+        gridColor: '#e1e3e6',
+        borderColor: '#d1d4dc',
+        crosshairColor: '#758696',
+        upColor: '#26a69a',
+        downColor: '#ef5350',
+      }, [isDark])
 
   const sym = useMemo(() => result?.symbols?.[symbol] || null, [result, symbol])
 
+  const precision = useMemo(() => {
+    const s = symbol.toLowerCase()
+    if (s.includes('eur') || s.includes('usd') || s.includes('gbp') || s.includes('jpy')) {
+      return s.includes('jpy') ? 3 : 5
+    }
+    return 2
+  }, [symbol])
+
+  const minMove = useMemo(() => 1 / Math.pow(10, precision), [precision])
+
+  useEffect(() => {
+    const onFs = () => {
+      const fs = Boolean(document.fullscreenElement)
+      if (!fs) {
+        if (exitFsTimerRef.current) window.clearTimeout(exitFsTimerRef.current)
+        exitFsTimerRef.current = window.setTimeout(() => setChartMountId((v) => v + 1), 120)
+      }
+    }
+    document.addEventListener('fullscreenchange', onFs)
+    return () => {
+      document.removeEventListener('fullscreenchange', onFs)
+      if (exitFsTimerRef.current) window.clearTimeout(exitFsTimerRef.current)
+    }
+  }, [])
+
+  async function toggleFullscreen() {
+    const el = wrapperRef.current
+    try {
+      if (!document.fullscreenElement) {
+        if (el?.requestFullscreen) await el.requestFullscreen()
+      } else {
+        if (document.exitFullscreen) await document.exitFullscreen()
+      }
+    } catch {}
+  }
+
+  // ---------------- CREATE CHART ----------------
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
 
+    didFitRef.current = false
+
     const chart = createChart(el, {
-      layout: { background: { color: '#0b1220' }, textColor: '#e5e7eb' },
-      grid: {
-        vertLines: { color: 'rgba(255,255,255,0.06)' },
-        horzLines: { color: 'rgba(255,255,255,0.06)' },
+      layout: {
+        background: { color: theme.background },
+        textColor: theme.textColor,
+        fontSize: 12,
+        fontFamily: 'Inter, Roboto, Arial',
       },
-      timeScale: { timeVisible: true, secondsVisible: false },
-      rightPriceScale: { borderColor: 'rgba(255,255,255,0.12)' },
+      grid: {
+        vertLines: { color: theme.gridColor },
+        horzLines: { color: theme.gridColor },
+      },
       crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: {
+        borderColor: theme.borderColor,
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        borderColor: theme.borderColor,
+      },
     })
 
     const candles = chart.addSeries(CandlestickSeries, {
-      upColor: '#22c55e',
-      downColor: '#ef4444',
+      upColor: theme.upColor,
+      downColor: theme.downColor,
+      borderUpColor: theme.upColor,
+      borderDownColor: theme.downColor,
+      wickUpColor: theme.upColor,
+      wickDownColor: theme.downColor,
+      borderVisible: true,
+      priceLineVisible: true,
+      lastValueVisible: true,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    const ema = chart.addSeries(LineSeries, {
+      color: '#2962FF',
+      lineWidth: 2,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    const tpPoints = chart.addSeries(LineSeries, {
+      color: '#089981',
+      lineWidth: 1,
+      lineVisible: false,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 4,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    const slPoints = chart.addSeries(LineSeries, {
+      color: '#f23645',
+      lineWidth: 1,
+      lineVisible: false,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 4,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    const tpLabels = chart.addSeries(CandlestickSeries, {
+      upColor: 'rgba(0,0,0,0)',
+      downColor: 'rgba(0,0,0,0)',
+      borderUpColor: 'rgba(0,0,0,0)',
+      borderDownColor: 'rgba(0,0,0,0)',
+      wickUpColor: 'rgba(0,0,0,0)',
+      wickDownColor: 'rgba(0,0,0,0)',
       borderVisible: false,
-      wickUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    const slLabels = chart.addSeries(CandlestickSeries, {
+      upColor: 'rgba(0,0,0,0)',
+      downColor: 'rgba(0,0,0,0)',
+      borderUpColor: 'rgba(0,0,0,0)',
+      borderDownColor: 'rgba(0,0,0,0)',
+      wickUpColor: 'rgba(0,0,0,0)',
+      wickDownColor: 'rgba(0,0,0,0)',
+      borderVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision, minMove },
     })
 
     chartRef.current = chart
-    candlesRef.current = candles
+    candleSeriesRef.current = candles
+    emaSeriesRef.current = ema
+    tpPointsSeriesRef.current = tpPoints
+    slPointsSeriesRef.current = slPoints
+    tpLabelSeriesRef.current = tpLabels
+    slLabelSeriesRef.current = slLabels
+    markersRef.current = createSeriesMarkers(candles, [])
+    tpMarkersRef.current = createSeriesMarkers(tpLabels, [])
+    slMarkersRef.current = createSeriesMarkers(slLabels, [])
 
-    const resizeToEl = () => {
+    const resize = () => {
       const rect = el.getBoundingClientRect()
-      const w = Math.floor(rect.width)
-      const h = Math.floor(rect.height)
-      if (w > 0 && h > 0) chart.resize(w, h)
+      if (rect.width && rect.height) chart.resize(rect.width, rect.height)
     }
 
-    const ro = new ResizeObserver(() => resizeToEl())
+    const ro = new ResizeObserver(resize)
     ro.observe(el)
-
-    const onFs = () => {
-      // Give the browser a tick to apply fullscreen layout.
-      setTimeout(resizeToEl, 50)
-    }
-    document.addEventListener('fullscreenchange', onFs)
-
-    resizeToEl()
+    resize()
 
     return () => {
       ro.disconnect()
-      document.removeEventListener('fullscreenchange', onFs)
       chart.remove()
-      chartRef.current = null
-      candlesRef.current = null
-      emaRef.current = null
-      zoneSeriesRef.current = []
     }
-  }, [])
+  }, [chartMountId, precision, minMove])
 
+  // ---------------- DATA UPDATE ----------------
   useEffect(() => {
     const chart = chartRef.current
-    const candles = candlesRef.current
-    if (!chart || !candles) return
+    const candles = candleSeriesRef.current
+    const ema = emaSeriesRef.current
+    const markers = markersRef.current
+    const tpMarkers = tpMarkersRef.current
+    const slMarkers = slMarkersRef.current
 
-    const removeZones = () => {
-      for (const s of zoneSeriesRef.current) chart.removeSeries(s)
-      zoneSeriesRef.current = []
-    }
+    if (!chart || !candles || !ema || !markers || !tpMarkers || !slMarkers) return
+
+    zoneSeriesRef.current.forEach(s => { try { chart.removeSeries(s) } catch {} })
+    zoneSeriesRef.current = []
+    orderBoxSeriesRef.current.forEach(s => { try { chart.removeSeries(s) } catch {} })
+    orderBoxSeriesRef.current = []
 
     if (!sym) {
       candles.setData([])
-      if (emaRef.current) {
-        chart.removeSeries(emaRef.current)
-        emaRef.current = null
-      }
-      removeZones()
+      ema.setData([])
+      tpPointsSeriesRef.current?.setData([])
+      slPointsSeriesRef.current?.setData([])
+      tpLabelSeriesRef.current?.setData([])
+      slLabelSeriesRef.current?.setData([])
+      markers.setMarkers([])
+      tpMarkers.setMarkers([])
+      slMarkers.setMarkers([])
       didFitRef.current = false
       return
     }
 
-    const nextCandles = sortAndDedupByTime((sym.candles || []).map((c: any) => ({
-      time: toTime(c.time) as Time,
-      open: Number(c.open),
-      high: Number(c.high),
-      low: Number(c.low),
-      close: Number(c.close),
-    })))
-    candles.setData(nextCandles)
+    const candleData = sortAndDedupByTime(
+      (sym.candles || [])
+        .map((c: any) => {
+          const time = toTime(c.time)
+          if (!time) return null
+          const adjustedTime = useLocalTime ? toLocalTime(time as Time) : time
+          return { time: adjustedTime as Time, open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close) }
+        })
+        .filter(Boolean) as any
+    )
+    candles.setData(candleData)
 
-    if (emaRef.current) {
-      chart.removeSeries(emaRef.current)
-      emaRef.current = null
+    // API may send chart_data (snake_case) or chartData (camelCase); support both and nested vs .points
+    const cd = sym.chartData ?? (sym as any).chart_data
+    const emaSource = cd?.indicators?.ema ?? cd?.ema?.points ?? sym.ema ?? []
+    const emaData = (emaSource as any[])
+      .map((p: any) => {
+        const time = toTime(p.time)
+        const value = Number(p.value)
+        if (!time || !Number.isFinite(value)) return null
+        const adjustedTime = useLocalTime ? toLocalTime(time as Time) : time
+        return { time: adjustedTime as Time, value }
+      })
+      .filter(Boolean) as any
+    ema.setData(emaData)
+
+    // Resistance/Support - chartData.zones.* or chartData.*.points or legacy sym.zones
+    const resistanceSegments = (cd?.zones?.resistance ?? cd?.resistance?.points ?? sym.zones?.resistanceSegments ?? []) as any[]
+    const supportSegments = (cd?.zones?.support ?? cd?.support?.points ?? sym.zones?.supportSegments ?? []) as any[]
+    
+    for (const seg of resistanceSegments) {
+      const val = Number(seg.value); const s = toTime(seg.startTime); const e = toTime(seg.endTime)
+      if (s && e && Number.isFinite(val) && s !== e) {
+        const adjustedS = useLocalTime ? toLocalTime(s as Time) : s as Time
+        const adjustedE = useLocalTime ? toLocalTime(e as Time) : e as Time
+        const zone = chart.addSeries(LineSeries, { color: 'rgba(239, 83, 80, 0.95)', lineWidth: 3, priceLineVisible: false, lastValueVisible: false })
+        zone.setData([{ time: adjustedS, value: val }, { time: adjustedE, value: val }])
+        zoneSeriesRef.current.push(zone)
+      }
     }
-    if (sym.ema && sym.ema.length) {
-      const emaSeries = chart.addSeries(LineSeries, { color: '#0000FF', lineWidth: 2 })
-      const nextEma = sortAndDedupByTime(sym.ema.map((p: any) => ({ time: toTime(p.time) as Time, value: Number(p.value) })))
-      emaSeries.setData(nextEma)
-      emaRef.current = emaSeries
+    for (const seg of supportSegments) {
+      const val = Number(seg.value); const s = toTime(seg.startTime); const e = toTime(seg.endTime)
+      if (s && e && Number.isFinite(val) && s !== e) {
+        const adjustedS = useLocalTime ? toLocalTime(s as Time) : s as Time
+        const adjustedE = useLocalTime ? toLocalTime(e as Time) : e as Time
+        const zone = chart.addSeries(LineSeries, { color: 'rgba(38, 166, 154, 0.95)', lineWidth: 3, priceLineVisible: false, lastValueVisible: false })
+        zone.setData([{ time: adjustedS, value: val }, { time: adjustedE, value: val }])
+        zoneSeriesRef.current.push(zone)
+      }
     }
 
-    removeZones()
-    const zones = sym.zones || {}
-    for (const seg of zones.resistanceSegments || []) {
-      if (String(seg.startTime) === String(seg.endTime)) continue
-      const s = chart.addSeries(LineSeries, { color: 'rgba(242, 54, 69, 0.9)', lineWidth: 2, priceLineVisible: false, lastValueVisible: false })
-      s.setData([
-        { time: toTime(seg.startTime) as Time, value: Number(seg.value) },
-        { time: toTime(seg.endTime) as Time, value: Number(seg.value) },
-      ])
-      zoneSeriesRef.current.push(s)
-    }
-    for (const seg of zones.supportSegments || []) {
-      if (String(seg.startTime) === String(seg.endTime)) continue
-      const s = chart.addSeries(LineSeries, { color: 'rgba(8, 153, 129, 0.9)', lineWidth: 2, priceLineVisible: false, lastValueVisible: false })
-      s.setData([
-        { time: toTime(seg.startTime) as Time, value: Number(seg.value) },
-        { time: toTime(seg.endTime) as Time, value: Number(seg.value) },
-      ])
-      zoneSeriesRef.current.push(s)
+    // --- Order Boxes & Markers (Toggleable) ---
+    const allMarkers: SeriesMarker<Time>[] = []
+    const tpPointData: { time: Time; value: number }[] = []
+    const slPointData: { time: Time; value: number }[] = []
+
+    // Add retest order placed markers (chartData.markers array or chartData.markers.points)
+    const rawMarkers = cd?.markers
+    const retestMarkers = Array.isArray(rawMarkers) ? rawMarkers : (rawMarkers?.points ?? [])
+    for (const marker of retestMarkers) {
+      const time = toTime(marker.time)
+      const value = Number(marker.value)
+      if (time && Number.isFinite(value)) {
+        const adjustedTime = useLocalTime ? toLocalTime(time as Time) : time as Time
+        allMarkers.push({
+          time: adjustedTime,
+          position: 'aboveBar',
+          color: marker.color || '#FF0000',
+          shape: marker.type === 'circle' ? 'circle' : 'arrowUp',
+          text: '',
+          size: marker.size || 8
+        })
+      }
     }
 
-    // Avoid resetting user's zoom/scroll on every live polling update.
-    // Auto-fit only once per mount / after clearing.
-    if (!didFitRef.current && nextCandles.length) {
+    if (showTrades) {
+      for (const b of sym.orderBoxes || []) {
+        const openTime = toTime(b.openTime); const closeTime = toTime(b.closeTime)
+        if (!openTime || !closeTime) continue
+
+        const entry = Number(b.entry); const sl = Number(b.sl); const tp = Number(b.tp)
+        const reason = String(b.closeReason || '')
+
+        // Markers
+        if (showTpSlMarkers) {
+          const adjustedCloseTime = useLocalTime ? toLocalTime(closeTime as Time) : closeTime as Time
+          if (reason === 'TP') {
+            if (Number.isFinite(tp)) tpPointData.push({ time: adjustedCloseTime, value: tp })
+          } else if (reason === 'SL') {
+            if (Number.isFinite(sl)) slPointData.push({ time: adjustedCloseTime, value: sl })
+          }
+        }
+
+        // Boxes
+        const { sl: slC, tp: tpC } = colorsForCloseReason(reason)
+        const adjustedOpenTime = useLocalTime ? toLocalTime(openTime as Time) : openTime as Time
+        const adjustedCloseTimeBox = useLocalTime ? toLocalTime(closeTime as Time) : closeTime as Time
+        const slS = chart.addSeries(BaselineSeries, { baseValue: { type: 'price', price: entry }, topFillColor1: slC, topFillColor2: slC, bottomFillColor1: slC, bottomFillColor2: slC, topLineColor: 'rgba(0,0,0,0)', bottomLineColor: 'rgba(0,0,0,0)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
+        slS.setData([{ time: adjustedOpenTime, value: sl }, { time: adjustedCloseTimeBox, value: sl }])
+        orderBoxSeriesRef.current.push(slS)
+
+        const tpS = chart.addSeries(BaselineSeries, { baseValue: { type: 'price', price: entry }, topFillColor1: tpC, topFillColor2: tpC, bottomFillColor1: tpC, bottomFillColor2: tpC, topLineColor: 'rgba(0,0,0,0)', bottomLineColor: 'rgba(0,0,0,0)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
+        tpS.setData([{ time: adjustedOpenTime, value: tp }, { time: adjustedCloseTimeBox, value: tp }])
+        orderBoxSeriesRef.current.push(tpS)
+      }
+    }
+
+    // Recreate TP/SL point series AFTER baseline boxes so points render on top
+    if (tpPointsSeriesRef.current) {
+      try { chart.removeSeries(tpPointsSeriesRef.current) } catch {}
+      tpPointsSeriesRef.current = null
+    }
+    if (slPointsSeriesRef.current) {
+      try { chart.removeSeries(slPointsSeriesRef.current) } catch {}
+      slPointsSeriesRef.current = null
+    }
+
+    if (tpLabelSeriesRef.current) {
+      try { chart.removeSeries(tpLabelSeriesRef.current) } catch {}
+      tpLabelSeriesRef.current = null
+    }
+    if (slLabelSeriesRef.current) {
+      try { chart.removeSeries(slLabelSeriesRef.current) } catch {}
+      slLabelSeriesRef.current = null
+    }
+
+    const tpPoints = chart.addSeries(LineSeries, {
+      color: '#089981',
+      lineWidth: 1,
+      lineVisible: false,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 4,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    const slPoints = chart.addSeries(LineSeries, {
+      color: '#f23645',
+      lineWidth: 1,
+      lineVisible: false,
+      pointMarkersVisible: true,
+      pointMarkersRadius: 4,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    const tpLabels = chart.addSeries(CandlestickSeries, {
+      upColor: 'rgba(0,0,0,0)',
+      downColor: 'rgba(0,0,0,0)',
+      borderUpColor: 'rgba(0,0,0,0)',
+      borderDownColor: 'rgba(0,0,0,0)',
+      wickUpColor: 'rgba(0,0,0,0)',
+      wickDownColor: 'rgba(0,0,0,0)',
+      borderVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    const slLabels = chart.addSeries(CandlestickSeries, {
+      upColor: 'rgba(0,0,0,0)',
+      downColor: 'rgba(0,0,0,0)',
+      borderUpColor: 'rgba(0,0,0,0)',
+      borderDownColor: 'rgba(0,0,0,0)',
+      wickUpColor: 'rgba(0,0,0,0)',
+      wickDownColor: 'rgba(0,0,0,0)',
+      borderVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      priceFormat: { type: 'price', precision, minMove },
+    })
+
+    tpPointsSeriesRef.current = tpPoints
+    slPointsSeriesRef.current = slPoints
+    tpLabelSeriesRef.current = tpLabels
+    slLabelSeriesRef.current = slLabels
+
+    // Rebind TP/SL marker plugins to the recreated label series
+    tpMarkersRef.current = createSeriesMarkers(tpLabels, [])
+    slMarkersRef.current = createSeriesMarkers(slLabels, [])
+
+    if (showIndexes && candleData.length) {
+      const STEP = candleData.length > 2000 ? 50 : 10
+      for (let i = 0; i < candleData.length; i += STEP) {
+        allMarkers.push({ time: candleData[i].time, position: 'belowBar', color: '#2962FF', shape: 'arrowUp', text: `${i}` })
+      }
+    }
+
+    const tpDedup = showTpSlMarkers ? dedupPointsByTime(tpPointData) : []
+    const slDedup = showTpSlMarkers ? dedupPointsByTime(slPointData) : []
+
+    tpPoints.setData(tpDedup)
+    slPoints.setData(slDedup)
+
+    tpLabels.setData(
+      tpDedup.map((p) => ({ time: p.time, open: p.value, high: p.value, low: p.value, close: p.value }))
+    )
+    slLabels.setData(
+      slDedup.map((p) => ({ time: p.time, open: p.value, high: p.value, low: p.value, close: p.value }))
+    )
+
+    // Labels anchored to TP/SL series points
+    tpMarkersRef.current?.setMarkers(
+      tpDedup.map((p) => ({
+        time: p.time,
+        position: 'inBar',
+        color: '#089981',
+        shape: 'circle',
+        text: '✅',
+      }))
+    )
+    slMarkersRef.current?.setMarkers(
+      slDedup.map((p) => ({
+        time: p.time,
+        position: 'inBar',
+        color: '#f23645',
+        shape: 'circle',
+        text: '❌',
+      }))
+    )
+
+    allMarkers.sort((a, b) => (a.time as number) - (b.time as number))
+    markers.setMarkers(allMarkers)
+
+    if (!didFitRef.current && candleData.length) {
       chart.timeScale().fitContent()
       didFitRef.current = true
     }
-  }, [sym])
+  }, [sym, chartMountId, showIndexes, showTrades, showTpSlMarkers, precision, minMove])
 
-  return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+  // ---------------- THEME & TOGGLES ----------------
+  useEffect(() => {
+    const chart = chartRef.current; const candles = candleSeriesRef.current
+    if (!chart || !candles) return
+    chart.applyOptions({
+      layout: { background: { color: theme.background }, textColor: theme.textColor },
+      grid: { vertLines: { color: theme.gridColor }, horzLines: { color: theme.gridColor } },
+      rightPriceScale: { borderColor: theme.borderColor },
+      timeScale: { borderColor: theme.borderColor },
+    })
+    candles.applyOptions({ upColor: theme.upColor, downColor: theme.downColor, borderUpColor: theme.upColor, borderDownColor: theme.downColor, wickUpColor: theme.upColor, wickDownColor: theme.downColor })
+  }, [theme])
+
+  const toggleTheme = () => setIsDark(v => { const n = !v; setCookie('chartTheme', n ? 'dark' : 'light'); return n })
+  const toggleIndexes = () => setShowIndexes(v => { const n = !v; setCookie('candleIndexes', String(n)); return n })
+  const toggleTrades = () => setShowTrades(v => { const n = !v; setCookie('showTrades', String(n)); return n })
+  const toggleTpSlMarkers = () => setShowTpSlMarkers(v => { const n = !v; setCookie('showTpSlMarkers', String(n)); return n })
+  const toggleLocalTime = () => setUseLocalTime(v => { const n = !v; setCookie('useLocalTime', String(n)); return n })
+
+  const colorsForCloseReason = (reason: string) => {
+    if (reason === 'TP') return { sl: 'rgba(242,54,69,0.05)', tp: 'rgba(8,153,129,0.25)' }
+    if (reason === 'SL') return { sl: 'rgba(242,54,69,0.25)', tp: 'rgba(8,153,129,0.05)' }
+    return { sl: 'rgba(242,54,69,0.1)', tp: 'rgba(8,153,129,0.1)' }
+  }
+
+  const btnStyle = {
+    padding: '6px 12px', borderRadius: 6, border: '1px solid #333', cursor: 'pointer',
+    background: isDark ? '#1f2937' : 'white', color: isDark ? '#fff' : '#000',
+    display: 'flex', alignItems: 'center', gap: 6,
+  } as const
+
+  const activeBtn = (isActive: boolean) => ({
+    ...btnStyle,
+    background: isActive ? '#2962FF' : btnStyle.background,
+    color: isActive ? '#fff' : btnStyle.color
+  })
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 10, display: 'flex', gap: 8 }}>
+        <button onClick={toggleFullscreen} style={btnStyle} title="Fullscreen" type="button"><span>⛶</span></button>
+        <button onClick={toggleTheme} style={btnStyle} type="button"><span>{isDark ? '☀️' : '🌙'}</span></button>
+        <button onClick={toggleTrades} style={activeBtn(showTrades)} title="Toggle trades" type="button"><span>📦</span></button>
+        <button onClick={toggleTpSlMarkers} style={activeBtn(showTpSlMarkers)} title="Toggle TP/SL markers" type="button"><span>✅</span></button>
+        <button onClick={toggleIndexes} style={activeBtn(showIndexes)} title="Toggle Candle Index" type="button"><span>🔢</span></button>
+        <button onClick={toggleLocalTime} style={activeBtn(useLocalTime)} title="Toggle Greek time" type="button"><span>🌍</span></button>
+      </div>
+      <div key={chartMountId} ref={containerRef} style={{ width: '100%', height: '100%' }} />
+    </div>
+  )
 }

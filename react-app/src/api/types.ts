@@ -47,6 +47,16 @@ export interface ResultJson {
       resistanceSegments?: Array<{ startTime: number | string; endTime: number | string; value: number }>
       supportSegments?: Array<{ startTime: number | string; endTime: number | string; value: number }>
     }
+    chartData?: {
+      zones?: {
+        resistance?: Array<{ type: string; startTime: number; endTime: number; value: number; color: string }>
+        support?: Array<{ type: string; startTime: number; endTime: number; value: number; color: string }>
+      }
+      indicators?: {
+        ema?: Array<{ time: number; value: number }>
+      }
+      markers?: Array<{ time: number; value: number; type: string; color: string; size: number }>
+    }
     markers?: any[]
     orderBoxes?: Array<{ openTime: number | string; closeTime: number | string; entry: number; sl: number; tp: number; closeReason?: string }>
   }>

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import Layout from '../components/Layout'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import ChartPanel from '../components/ChartPanel'
+import ChartHeightAdjuster from '../components/ChartHeightAdjuster'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { fetchLiveSnapshot, fetchLiveStatus, setActiveSessionId, stopLive } from '../store/slices/liveSlice'
 import { fetchParamSchema } from '../store/slices/paramSchemaSlice'
@@ -26,6 +27,8 @@ export default function LivePage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const dispatch = useAppDispatch()
 
+  const [chartHeight, setChartHeight] = useState(420)
+  
   const status = useAppSelector((s) => s.live.status)
   const snapshot = useAppSelector((s) => s.live.snapshot)
   const error = useAppSelector((s) => s.live.error)
@@ -119,6 +122,10 @@ export default function LivePage() {
     }
   }
 
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text).catch(() => {})
+  }
+
   useEffect(() => {
     const el = stdoutRef.current
     if (!el) return
@@ -179,12 +186,13 @@ export default function LivePage() {
 
         {symbols.length ? (
           <div style={{ display: 'grid', gap: 14 }}>
+            <ChartHeightAdjuster value={chartHeight} onChange={setChartHeight} />
             {symbols.map((sym) => (
               <div key={sym}>
                 <ChartPanel
                   result={snapshot}
                   symbol={sym}
-                  height={420}
+                  height={chartHeight}
                   headerRight={<span className="muted">{(snapshot as any)?.meta?.timeframe || ''}</span>}
                 />
               </div>
@@ -198,10 +206,36 @@ export default function LivePage() {
       <div style={{ height: 14 }} />
 
       <div className="split" style={{ gridTemplateColumns: '1fr 1fr' }}>
-        <Card title={<span style={{ fontWeight: 800 }}>stdout</span>}>
+        <Card
+          title={<span style={{ fontWeight: 800 }}>stdout</span>}
+          right={
+            <button
+              type="button"
+              className="iconButton"
+              onClick={() => copyToClipboard(status?.stdout_tail || '')}
+              title="Copy stdout"
+              aria-label="Copy stdout"
+            >
+              ⎘
+            </button>
+          }
+        >
           <div ref={stdoutRef} className="log">{status?.stdout_tail || ''}</div>
         </Card>
-        <Card title={<span style={{ fontWeight: 800 }}>stderr</span>}>
+        <Card
+          title={<span style={{ fontWeight: 800 }}>stderr</span>}
+          right={
+            <button
+              type="button"
+              className="iconButton"
+              onClick={() => copyToClipboard(status?.stderr_tail || '')}
+              title="Copy stderr"
+              aria-label="Copy stderr"
+            >
+              ⎘
+            </button>
+          }
+        >
           <div ref={stderrRef} className="log">{status?.stderr_tail || ''}</div>
         </Card>
       </div>

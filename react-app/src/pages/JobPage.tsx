@@ -13,6 +13,19 @@ function safeString(v: any): string {
   return String(v)
 }
 
+const btnStyle = {
+  background: 'rgba(255, 255, 255, 0.1)',
+  border: '1px solid rgba(255, 255, 255, 0.2)',
+  cursor: 'pointer',
+  padding: '6px 10px',
+  borderRadius: '6px',
+  color: '#fff',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  transition: 'background 0.2s, border-color 0.2s',
+} as const
+
 function useInterval(callback: () => void, delayMs: number | null) {
   const saved = useRef(callback)
   useEffect(() => {
@@ -248,10 +261,40 @@ export default function JobPage() {
       <div style={{ height: 14 }} />
 
       <div className="split" style={{ gridTemplateColumns: '1fr 1fr' }}>
-        <Card title={<span style={{ fontWeight: 800 }}>stdout</span>}>
+        <Card 
+          title={<span style={{ fontWeight: 800 }}>stdout</span>}
+          right={
+            <button
+              onClick={() => navigator.clipboard.writeText(status?.stdout_tail || '')}
+              style={btnStyle}
+              title="Copy stdout"
+              type="button"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          }
+        >
           <div ref={stdoutRef} className="log">{status?.stdout_tail || ''}</div>
         </Card>
-        <Card title={<span style={{ fontWeight: 800 }}>stderr</span>}>
+        <Card 
+          title={<span style={{ fontWeight: 800 }}>stderr</span>}
+          right={
+            <button
+              onClick={() => navigator.clipboard.writeText(status?.stderr_tail || '')}
+              style={btnStyle}
+              title="Copy stderr"
+              type="button"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          }
+        >
           <div ref={stderrRef} className="log">{status?.stderr_tail || ''}</div>
         </Card>
       </div>

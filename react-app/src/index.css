@@ -54,8 +54,7 @@ code {
 }
 
 .container {
-  max-width: 1240px;
-  width: min(1240px, calc(100% - 40px));
+  width: 90%;
   margin: 0 auto;
   padding: 20px;
 }
@@ -139,6 +138,19 @@ code {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+.iconButton {
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.iconButton:hover { background: rgba(255,255,255,0.10); }
 
 .input, .select {
   width: 100%;
