@@ -10,8 +10,10 @@ from loguru import logger
 
 # Add the src directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# Also add project root to path for data imports
+sys.path.append(os.path.dirname(__file__))
 
-from utils.config import Config, load_config
+from src.utils.config import Config, load_config
 from src.data.csv_data_feed import CSVDataFeed
 from indicators.TestIndicator import TestIndicator
 from strategies.BreakRetestStrategy import BreakRetestStrategy

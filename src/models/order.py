@@ -1,7 +1,7 @@
 from enum import Enum, auto
 import math
 
-from utils.logging import log
+from src.utils.logging import log
 
 class TradeState(Enum):
     PENDING = auto()

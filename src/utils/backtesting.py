@@ -15,9 +15,15 @@ if _root_dir not in sys.path:
 # Platform-specific imports
 if sys.platform == "win32":
     import MetaTrader5 as mt5
-    from data.fetch import fetch_candles
+    from src.data.fetch import fetch_candles
 else:
     # On Mac/Linux, use remote server to fetch data
+    # Use absolute import since we're in src/utils
+    import sys
+    import os
+    project_root = os.path.dirname(_root_dir) if os.path.basename(_root_dir) == 'src' else _root_dir
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from data.fetch_client import fetch_from_server
 
 # Import CSV filename generator from fetch_constants

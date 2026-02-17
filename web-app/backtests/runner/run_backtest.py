@@ -10,6 +10,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# Add parent directory to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Add project root to Python path for main.py imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+# Import chart overlay utilities
+from utils.chart_overlay import generate_chart_overlay_data
+
 
 def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
@@ -86,11 +96,15 @@ def main() -> int:
     for k, v in (params.get("env_overrides") or {}).items():
         os.environ[str(k)] = str(v)
 
-    # Ensure imports resolve
+    # Ensure imports resolve - don't change directory, just set paths
     repo_root = _repo_root()
-    os.chdir(repo_root)
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
+    
+    # Add src directory to path for main.py imports (after repo root)
+    src_path = repo_root / "src"
+    if str(src_path) not in sys.path:
+        sys.path.append(str(src_path))
 
     try:
         _write_json(
@@ -154,135 +168,20 @@ def main() -> int:
                 for i in range(len(df))
             ]
 
-            # EMA (compute per-symbol from candle closes)
-            ema_series: list[dict[str, Any]] = []
-            try:
-                ema_len = int(os.environ.get("EMA_LENGTH") or 0)
-            except Exception:
-                ema_len = 0
-            if ema_len and ema_len > 0:
-                # Use pandas EWM to match standard EMA behavior
-                ema_vals = pd.Series(df["close"].astype(float)).ewm(span=ema_len, adjust=False).mean().to_list()
-                for i, val in enumerate(ema_vals):
-                    if val is None or (isinstance(val, float) and math.isnan(val)):
-                        continue
-                    ema_series.append({"time": times_s[i], "value": float(val)})
-
-            # Zones (support/resistance segments)
-            zones = {"supportSegments": [], "resistanceSegments": []}
-            try:
-                if hasattr(cerebro, "data_indicators"):
-                    indicators = cerebro.data_indicators.get(symbol_index)
-                    breakout = indicators.get("breakout") if indicators else None
-                    if breakout is not None:
-                        res_vals = np.asarray(breakout.lines.resistance1.array, dtype=float)
-                        sup_vals = np.asarray(breakout.lines.support1.array, dtype=float)
-                        zones["resistanceSegments"] = _segments_from_constant_levels(times_s, res_vals.tolist())
-                        zones["supportSegments"] = _segments_from_constant_levels(times_s, sup_vals.tolist())
-            except Exception:
-                # Non-fatal; keep chart usable even if zones extraction fails.
-                zones = {"supportSegments": [], "resistanceSegments": []}
-
-            # Trades / markers
-            trades: list[dict[str, Any]] = []
-            markers: list[dict[str, Any]] = []
-            order_boxes: list[dict[str, Any]] = []
-            try:
-                if strat is not None and hasattr(strat, "get_completed_trades"):
-                    trades_all = strat.get_completed_trades()
-                    trades = [t for t in trades_all if t.get("symbol") == symbol]
-
-                    for t in trades:
-                        dt = t.get("open_datetime") or t.get("placed_datetime")
-                        if not dt:
-                            continue
-                        if hasattr(dt, "to_pydatetime"):
-                            dt = dt.to_pydatetime()
-                        ts = _to_unix_seconds(dt)
-                        side = str(t.get("order_side") or t.get("side") or "").upper()
-                        is_buy = "SELL" not in side
-                        markers.append(
-                            {
-                                "time": ts,
-                                "position": "belowBar" if is_buy else "aboveBar",
-                                "color": "#2196F3" if is_buy else "#F23645",
-                                "shape": "arrowUp" if is_buy else "arrowDown",
-                                "text": "",
-                            }
-                        )
-
-                        # Exit marker (TP/SL)
-                        close_reason = str(t.get("close_reason") or "")
-                        close_dt = t.get("close_datetime")
-                        if close_dt and close_reason in {"TP", "SL"}:
-                            if hasattr(close_dt, "to_pydatetime"):
-                                close_dt = close_dt.to_pydatetime()
-                            close_ts = _to_unix_seconds(close_dt)
-                            if close_reason == "TP":
-                                markers.append(
-                                    {
-                                        "time": close_ts,
-                                        "position": "aboveBar",
-                                        "color": "#089981",
-                                        "shape": "circle",
-                                        "text": "✓",
-                                    }
-                                )
-                            else:
-                                markers.append(
-                                    {
-                                        "time": close_ts,
-                                        "position": "belowBar",
-                                        "color": "#F23645",
-                                        "shape": "circle",
-                                        "text": "✗",
-                                    }
-                                )
-
-                    # Order boxes (SL / TP zones)
-                    for t in trades:
-                        open_dt = t.get("open_datetime") or t.get("placed_datetime")
-                        close_dt = t.get("close_datetime") or open_dt
-                        if not open_dt:
-                            continue
-                        if hasattr(open_dt, "to_pydatetime"):
-                            open_dt = open_dt.to_pydatetime()
-                        if close_dt and hasattr(close_dt, "to_pydatetime"):
-                            close_dt = close_dt.to_pydatetime()
-
-                        open_ts = _to_unix_seconds(open_dt)
-                        close_ts = _to_unix_seconds(close_dt) if close_dt else open_ts
-                        if close_ts < open_ts:
-                            close_ts = open_ts
-
-                        entry_price = t.get("entry_executed_price") or t.get("entry_price")
-                        stop_loss = t.get("stop_loss") or t.get("sl")
-                        take_profit = t.get("take_profit") or t.get("tp")
-                        if entry_price is None or stop_loss is None or take_profit is None:
-                            continue
-
-                        order_boxes.append(
-                            {
-                                "openTime": int(open_ts),
-                                "closeTime": int(close_ts),
-                                "entry": float(entry_price),
-                                "sl": float(stop_loss),
-                                "tp": float(take_profit),
-                                "closeReason": str(t.get("close_reason") or ""),
-                            }
-                        )
-            except Exception:
-                trades = []
-                markers = []
-                order_boxes = []
+            # Generate chart overlay data using the utility function
+            overlay_data = generate_chart_overlay_data(cerebro, symbol_index, times_s, df)
+            
+            # Filter trades for this specific symbol
+            symbol_trades = [t for t in overlay_data["trades"] if t.get("symbol") == symbol]
+            overlay_data["trades"] = symbol_trades
 
             out_symbols[symbol] = {
                 "candles": candles,
-                "ema": ema_series,
-                "zones": zones,
-                "markers": markers,
-                "orderBoxes": order_boxes,
-                "trades": trades,
+                "ema": overlay_data["ema"],
+                "zones": overlay_data["zones"],
+                "markers": overlay_data["markers"],
+                "orderBoxes": overlay_data["orderBoxes"],
+                "trades": overlay_data["trades"],
             }
 
         payload = {

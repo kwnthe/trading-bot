@@ -5,15 +5,15 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from indicators import BreakoutIndicator
-from indicators import BreakRetestIndicator
-from models.candlestick import Candlestick
+from src.indicators.BreakoutIndicator import BreakoutIndicator
+from src.indicators.BreakRetestIndicator import BreakRetestIndicator
+from src.models.candlestick import Candlestick
 from src.models.chart_markers import ChartDataType, ChartData, ChartDataPoint, ChartMarkerType
 from src.models.order import OrderType, OrderSide, TradeState
-from utils.config import Config
-from utils.strategy_utils.general_utils import convert_pips_to_price
-from infrastructure import StrategyLogger, RepositoryType, LogLevel, RepositoryName
-from utils.logging import configure_windows_console_for_utf8
+from src.utils.config import Config
+from src.utils.strategy_utils.general_utils import convert_pips_to_price
+from src.infrastructure import StrategyLogger, RepositoryType, LogLevel, RepositoryName
+from src.utils.logging import configure_windows_console_for_utf8
 
 configure_windows_console_for_utf8()
 

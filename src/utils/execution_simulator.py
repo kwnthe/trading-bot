@@ -6,7 +6,7 @@ Adds slippage and spread simulation to make backtests more realistic.
 import backtrader as bt
 from typing import Optional
 from src.utils.strategy_utils.general_utils import convert_pips_to_price
-from utils.config import Config
+from src.utils.config import Config
 
 
 class RealisticExecutionBroker(bt.brokers.BackBroker):

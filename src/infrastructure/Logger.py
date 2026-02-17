@@ -3,7 +3,7 @@ from typing import TextIO
 from datetime import datetime
 import sys
 from pathlib import Path
-from utils.config import Config
+from src.utils.config import Config
 
 
 class LogLevel(str, Enum):
