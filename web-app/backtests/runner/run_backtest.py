@@ -13,12 +13,18 @@ from typing import Any
 # Add parent directory to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Add src to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
+
+from src.utils.chart_utils import prepare_chart_data_for_frontend
+
 # Add project root to Python path for main.py imports
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import chart overlay utilities
 from utils.chart_overlay import generate_chart_overlay_data
+from src.infrastructure.ChartOverlayManager import get_chart_overlay_manager, set_chart_overlay_manager_for_job
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -90,6 +96,9 @@ def main() -> int:
     status_path = job_dir / "status.json"
     result_path = job_dir / "result.json"
 
+    # Initialize ChartOverlayManager to use the job directory
+    set_chart_overlay_manager_for_job(job_dir)
+
     params = _load_json(params_path)
 
     # Apply env overrides BEFORE importing repo code (Config loads at import time).
@@ -105,6 +114,12 @@ def main() -> int:
     src_path = repo_root / "src"
     if str(src_path) not in sys.path:
         sys.path.append(str(src_path))
+
+    # Import config module and reload it after env overrides are applied
+    import src.utils.config as config_module
+    import importlib
+    importlib.reload(config_module)
+    from src.utils.config import Config
 
     try:
         _write_json(
@@ -168,20 +183,39 @@ def main() -> int:
                 for i in range(len(df))
             ]
 
-            # Generate chart overlay data using the utility function
-            overlay_data = generate_chart_overlay_data(cerebro, symbol_index, times_s, df)
+            # Get chart overlay data from ChartOverlayManager (dynamic JSON storage)
+            overlay_manager = get_chart_overlay_manager()
+            overlay_data = overlay_manager.convert_to_legacy_format()
             
             # Filter trades for this specific symbol
             symbol_trades = [t for t in overlay_data["trades"] if t.get("symbol") == symbol]
             overlay_data["trades"] = symbol_trades
 
+            # Calculate actual candle duration from the data (instead of static 3600)
+            if len(candles) >= 2:
+                candle_duration = candles[1]["time"] - candles[0]["time"]
+            else:
+                candle_duration = 3600  # Fallback to 1 hour if insufficient data
+
+            # Prepare chart data for frontend using utility functions
+            chart_data = prepare_chart_data_for_frontend(overlay_data, timeframe_seconds=candle_duration)
+
             out_symbols[symbol] = {
                 "candles": candles,
-                "ema": overlay_data["ema"],
-                "zones": overlay_data["zones"],
-                "markers": overlay_data["markers"],
-                "orderBoxes": overlay_data["orderBoxes"],
-                "trades": overlay_data["trades"],
+                "chartOverlayData": {
+                    "ema": {
+                        "points": chart_data["ema_points"]
+                    },
+                    "resistance": {
+                        "points": chart_data["resistance_segments"]
+                    },
+                    "support": {
+                        "points": chart_data["support_segments"]
+                    },
+                    "markers": chart_data["markers"]
+                },
+                "orderBoxes": chart_data["order_boxes"],
+                "trades": chart_data["trades"],
             }
 
         payload = {

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef } from 'react'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 
 import Layout from '../components/Layout'
 import Card from '../components/Card'
 import Button from '../components/Button'
-import ChartPanel from '../components/ChartPanel'
-import ChartHeightAdjuster from '../components/ChartHeightAdjuster'
+import ChartsContainer from '../components/ChartsContainer'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { fetchLiveSnapshot, fetchLiveStatus, setActiveSessionId, stopLive } from '../store/slices/liveSlice'
 import { fetchParamSchema } from '../store/slices/paramSchemaSlice'
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 
 function useInterval(callback: () => void, delayMs: number | null) {
   const saved = useRef(callback)
@@ -26,9 +26,8 @@ function useInterval(callback: () => void, delayMs: number | null) {
 export default function LivePage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const dispatch = useAppDispatch()
+  const navigate = useNavigate()
 
-  const [chartHeight, setChartHeight] = useState(420)
-  
   const status = useAppSelector((s) => s.live.status)
   const snapshot = useAppSelector((s) => s.live.snapshot)
   const error = useAppSelector((s) => s.live.error)
@@ -138,6 +137,16 @@ export default function LivePage() {
     el.scrollTop = el.scrollHeight
   }, [status?.stderr_tail])
 
+  // Use keyboard shortcuts hook
+  useKeyboardShortcuts({
+    shortcuts: [
+      {
+        key: 'b',
+        action: () => navigate('/')
+      }
+    ]
+  })
+
   return (
     <Layout
       title={
@@ -185,19 +194,11 @@ export default function LivePage() {
         ) : null}
 
         {symbols.length ? (
-          <div style={{ display: 'grid', gap: 14 }}>
-            <ChartHeightAdjuster value={chartHeight} onChange={setChartHeight} />
-            {symbols.map((sym) => (
-              <div key={sym}>
-                <ChartPanel
-                  result={snapshot}
-                  symbol={sym}
-                  height={chartHeight}
-                  headerRight={<span className="muted">{(snapshot as any)?.meta?.timeframe || ''}</span>}
-                />
-              </div>
-            ))}
-          </div>
+          <ChartsContainer
+            result={snapshot}
+            symbols={symbols}
+            headerRight={<span className="muted">{(snapshot as any)?.meta?.timeframe || ''}</span>}
+          />
         ) : (
           <div className="muted">No data yet.</div>
         )}

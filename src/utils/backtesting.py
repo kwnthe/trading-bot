@@ -24,10 +24,14 @@ else:
     project_root = os.path.dirname(_root_dir) if os.path.basename(_root_dir) == 'src' else _root_dir
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
-    from data.fetch_client import fetch_from_server
+    # Ensure we can import from data directory
+    data_path = os.path.join(project_root, 'data')
+    if data_path not in sys.path:
+        sys.path.insert(0, data_path)
+    from fetch_client import fetch_from_server
 
 # Import CSV filename generator from fetch_constants
-from data.fetch_constants import generate_csv_filename as _generate_csv_filename_base
+from fetch_constants import generate_csv_filename as _generate_csv_filename_base
 
 
 def _is_valid_ohlc_csv(file_path: Path) -> bool:

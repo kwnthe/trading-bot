@@ -16,6 +16,7 @@ import Button from '../components/Button'
 import { deletePreset } from '../store/slices/presetsSlice'
 import { hydrateFavorites, removeFavoriteAndPersist } from '../store/slices/favoritesSlice'
 import { fetchStrategies, setSelectedStrategyId, startLive, stopLive } from '../store/slices/liveSlice'
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 
 function groupDefs(defs: ParamDef[]) {
   const groups = new Map<string, ParamDef[]>()
@@ -270,6 +271,30 @@ export default function BacktestFormPage() {
     const mt5Local = loadMt5Local()
     dispatch(setAllParams({ ...(schemaInitial || {}), ...mt5Local }))
   }, [dispatch, schemaDefs.length, schemaError, schemaInitial, schemaLoading, restoredFromCookie, params])
+
+  // Use keyboard shortcuts hook
+  useKeyboardShortcuts({
+    shortcuts: [
+      {
+        key: 'r',
+        action: () => {
+          // Create and dispatch a synthetic submit event
+          const form = document.querySelector('form')
+          if (form) {
+            const submitEvent = new Event('submit', { 
+              cancelable: true,
+              bubbles: true 
+            })
+            form.dispatchEvent(submitEvent)
+          }
+        }
+      },
+      {
+        key: 'b',
+        action: () => navigate('/')
+      }
+    ]
+  })
 
   async function onLoadPreset() {
     setPresetError(null)

@@ -57,6 +57,21 @@ export interface ResultJson {
       }
       markers?: Array<{ time: number; value: number; type: string; color: string; size: number }>
     }
+    chartOverlayData?: {
+      [timestamp: string]: {
+        [symbolIndex: string]: {
+          ema?: number
+          support?: number
+          resistance?: number
+          retest_order_placed?: {
+            price: number
+            time: number
+            direction: string
+          }
+          // Add other properties as needed
+        }
+      }
+    }
     markers?: any[]
     orderBoxes?: Array<{ openTime: number | string; closeTime: number | string; entry: number; sl: number; tp: number; closeReason?: string }>
   }>

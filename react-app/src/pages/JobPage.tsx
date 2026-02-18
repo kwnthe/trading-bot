@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { fetchJobResult, fetchJobStatus, resetJob, setJobId } from '../store/slices/jobSlice'
 import { fetchParamSchema } from '../store/slices/paramSchemaSlice'
 import { addFavoriteAndPersist, removeFavoriteAndPersist } from '../store/slices/favoritesSlice'
-import ChartPanel from '../components/ChartPanel'
+import ChartsContainer from '../components/ChartsContainer'
 import Layout from '../components/Layout'
 import Card from '../components/Card'
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 
 function safeString(v: any): string {
   if (v === null || v === undefined) return ''
@@ -42,6 +43,7 @@ function useInterval(callback: () => void, delayMs: number | null) {
 export default function JobPage() {
   const { jobId: jobIdParam } = useParams<{ jobId: string }>()
   const dispatch = useAppDispatch()
+  const navigate = useNavigate()
 
   const status = useAppSelector((s) => s.job.status)
   const result = useAppSelector((s) => s.job.result)
@@ -98,6 +100,19 @@ export default function JobPage() {
   useEffect(() => {
     // no-op (kept for possible future hydration work)
   }, [])
+
+  // Use keyboard shortcuts hook
+  useKeyboardShortcuts({
+    shortcuts: [
+      {
+        key: 'b',
+        action: () => {
+          dispatch(resetJob())
+          navigate('/')
+        }
+      }
+    ]
+  })
 
   useEffect(() => {
     const el = stdoutRef.current
@@ -246,13 +261,10 @@ export default function JobPage() {
       >
         {error ? <div className="muted"><b>Error:</b> {error}</div> : null}
         {symbols.length ? (
-          <div style={{ display: 'grid', gap: 14 }}>
-            {symbols.map((sym) => (
-              <div key={sym}>
-                <ChartPanel result={result} symbol={sym} height={420} />
-              </div>
-            ))}
-          </div>
+          <ChartsContainer
+            result={result}
+            symbols={symbols}
+          />
         ) : (
           <div className="muted">No chart data.</div>
         )}

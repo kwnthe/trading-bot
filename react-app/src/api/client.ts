@@ -2,9 +2,18 @@ async function readJsonSafe(res: Response): Promise<any> {
   const text = await res.text()
   if (!text) return {}
   try {
-    return JSON.parse(text)
-  } catch {
-    return { raw: text }
+    const cleanedText = text.replace(/\bNaN\b/g, 'null').trim()
+    return JSON.parse(cleanedText)
+  } catch (error) {
+    console.error('JSON parsing failed:', error)
+    console.error('Response text:', text.substring(0, 200) + '...')
+    // Try without cleaning as fallback
+    try {
+      return JSON.parse(text)
+    } catch (secondError) {
+      console.error('Second parsing attempt also failed:', secondError)
+      return { raw: text }
+    }
   }
 }
 

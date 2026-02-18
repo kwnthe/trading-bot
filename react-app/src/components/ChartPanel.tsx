@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
 
-import BacktestChart from './BacktestChart'
+import ChartComponent from './ChartComponent'
 import type { ResultJson } from '../api/types'
 
 type Props = {
@@ -24,7 +24,7 @@ export default function ChartPanel({ result, symbol, height = 520, headerLeft, h
       </div>
 
       <div className="chartPanel" style={{ height }}>
-        <BacktestChart result={result} symbol={symbol} />
+        <ChartComponent result={result} symbol={symbol} />
       </div>
     </div>
   )

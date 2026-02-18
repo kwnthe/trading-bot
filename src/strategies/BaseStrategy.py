@@ -2,7 +2,6 @@ import backtrader as bt
 import csv
 import math
 import os
-import sys
 from datetime import datetime
 from pathlib import Path
 from src.indicators.BreakoutIndicator import BreakoutIndicator
@@ -13,6 +12,7 @@ from src.models.order import OrderType, OrderSide, TradeState
 from src.utils.config import Config
 from src.utils.strategy_utils.general_utils import convert_pips_to_price
 from src.infrastructure import StrategyLogger, RepositoryType, LogLevel, RepositoryName
+from src.infrastructure.ChartOverlayManager import get_chart_overlay_manager
 from src.utils.logging import configure_windows_console_for_utf8
 
 configure_windows_console_for_utf8()
@@ -246,6 +246,12 @@ class BaseStrategy(bt.Strategy):
             just_broke_out, breakout_trend = breakout_ind.just_broke_out()
             support = breakout_ind.lines.support1[0]
             resistance = breakout_ind.lines.resistance1[0]
+            
+            # Validate support/resistance values - skip NaN values
+            if math.isnan(support):
+                support = None
+            if math.isnan(resistance):
+                resistance = None
             
             # Store in cerebro if available, otherwise broker
             if cerebro is not None:
@@ -964,12 +970,20 @@ class BaseStrategy(bt.Strategy):
         if data_type == ChartDataType.MARKER:
             # Handle marker data (backward compatibility with set_chart_marker)
             candle_index = kwargs.get('candle_index')
+            time_param = kwargs.get('time')  # New: direct time parameter
             price = kwargs.get('price')
             marker_type = kwargs.get('marker_type', 'diamond')
             
-            if candle_index is not None and price is not None:
+            # Use direct time if provided, otherwise convert from candle_index
+            if time_param is not None and price is not None:
+                time_value = time_param
+            elif candle_index is not None and price is not None:
                 # Convert time from candle index to actual timestamp if available
                 time_value = self._get_time_for_candle_index(candle_index, data_feed_index)
+            else:
+                time_value = None
+                
+            if time_value is not None:
                 data_container.add_point_at_time(
                     time=time_value,
                     value=price,
@@ -977,8 +991,18 @@ class BaseStrategy(bt.Strategy):
                     candle_index=candle_index
                 )
                 
-                # Also store in old chart_markers for backward compatibility
-                self.set_chart_marker(candle_index, price, data_feed_index, marker_type)
+                # Writes chart direction on markers (not best design-wise but good for now)           
+                overlay_manager = get_chart_overlay_manager()
+                overlay_manager.add_overlay_data(
+                    datetime_number=time_value,
+                    data_type=data_type,
+                    data_feed_index=data_feed_index,
+                    candle_index=candle_index,
+                    price=price,
+                    marker_type=marker_type,
+                    direction=kwargs.get('direction')  # Add direction parameter
+                )
+                overlay_manager.save_to_file()
         
         elif data_type in [ChartDataType.SUPPORT, ChartDataType.RESISTANCE, ChartDataType.EMA]:
             # Handle line/zone data
@@ -990,23 +1014,63 @@ class BaseStrategy(bt.Strategy):
                         value=point['value'],
                         **{k: v for k, v in point.items() if k not in ['time', 'value']}
                     )
+            
+            # Write to ChartOverlayManager for dynamic JSON storage
+            if points:
+                overlay_manager = get_chart_overlay_manager()
+                for point in points:
+                    if isinstance(point, dict) and 'time' in point and 'value' in point:
+                        overlay_manager.add_overlay_data(
+                            datetime_number=point['time'],
+                            data_type=data_type,
+                            data_feed_index=data_feed_index,
+                            points=[point]
+                        )
+                overlay_manager.save_to_file()
     
-    def _get_time_for_candle_index(self, candle_index: int, data_feed_index: int = 0) -> int:
+    def _get_time_for_candle_index(self, candle_index: int, data_feed_index: int = 0) -> int | None:
         """
         Get the timestamp for a given candle index.
         This is a helper method for converting candle indices to timestamps.
+        Returns None if timestamp cannot be retrieved (safer than wrong timestamp).
         """
         try:
             data_indicators = self._get_data_indicators()
             if data_feed_index in data_indicators:
                 data = data_indicators[data_feed_index]['data']
+                
+                # Try different methods to get the datetime
                 if hasattr(data, 'datetime') and len(data.datetime) > candle_index:
-                    return int(data.datetime[candle_index].timestamp())
-        except (AttributeError, IndexError, ValueError):
-            pass
+                    # Method 1: Direct datetime access
+                    dt = data.datetime[candle_index]
+                    if hasattr(dt, 'timestamp'):
+                        return int(dt.timestamp())
+                    elif isinstance(dt, (int, float)):
+                        return int(dt)
+                
+                # Method 2: Try accessing through data lines (backtrader format)
+                if hasattr(data, 'lines') and hasattr(data.lines, 'datetime'):
+                    datetime_line = data.lines.datetime
+                    if len(datetime_line) > candle_index:
+                        dt = datetime_line[candle_index]
+                        if hasattr(dt, 'timestamp'):
+                            return int(dt.timestamp())
+                        elif isinstance(dt, (int, float)):
+                            return int(dt)
+                
+                # Method 3: Use current candle's datetime from backtrader
+                if hasattr(self, 'data') and hasattr(self.data, 'datetime') and len(self.data.datetime) > 0:
+                    dt = self.data.datetime[0]  # Current candle
+                    if hasattr(dt, 'timestamp'):
+                        return int(dt.timestamp())
+                    elif isinstance(dt, (int, float)):
+                        return int(dt)
+                        
+        except (AttributeError, IndexError, ValueError) as e:
+            print(f"Warning: Could not get timestamp for candle {candle_index}: {e}")
         
-        # Fallback: return candle_index as time (not ideal but prevents crashes)
-        return candle_index
+        # Return None instead of wrong timestamp - safer for trading systems
+        return None
     
     def get_chart_data(self, data_type: ChartDataType, data_feed_index: int = 0) -> ChartData:
         """
@@ -1080,6 +1144,10 @@ class BaseStrategy(bt.Strategy):
             
             # Get current time
             current_time = self._get_time_for_candle_index(self.candle_index, data_feed_index)
+            
+            # Skip if timestamp unavailable
+            if current_time is None:
+                return
             
             # Send support and resistance from breakout indicator
             if 'breakout' in indicators:

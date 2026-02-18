@@ -1,6 +1,6 @@
 from pathlib import Path
 import sys
-
+import math
 from src.models.trend import Trend
 from src.strategies.BaseStrategy import BaseStrategy
 from src.models.order import OrderType, TradeState, OrderSide, log_trade
@@ -82,6 +82,17 @@ class BreakRetestStrategy(BaseStrategy):
                 RSIConfirmations.daily_rsi_allows_trade(daily_rsi, pair_state['breakout_trend']) if Config.check_for_daily_rsi else True,
                 current_bar_time.weekday() != 0,  # Don't take orders on Monday (0 = Monday)
             ]
+            
+            # Get current candle's datetime first (needed for both markers and EMA)
+            current_bar_time = data.datetime.datetime(0) if hasattr(data, 'datetime') else None
+            current_time = int(current_bar_time.timestamp()) if current_bar_time else self._get_time_for_candle_index(self.candle_index, i)
+            
+            # Add EMA data for current candle (dynamic chart overlay)
+            ema = data_indicators[i]['ema']
+            
+            # Initialize take_trade variable
+            take_trade = False
+            
             if not is_backfilling_live_mode and all(order_confirmations):
                 take_trade = True
                 # if self.ai_filter and pair_state.get('support') is not None and pair_state.get('resistance') is not None:
@@ -91,15 +102,39 @@ class BreakRetestStrategy(BaseStrategy):
                 #             data_indicators[i], pair_state['breakout_trend'], entry_price, sl, tp
                 #         )
                 #         take_trade = self.ai_filter.predict(features) >= getattr(self.ai_filter, 'best_threshold', 0.5)
+                
                 if take_trade:
                     self.place_retest_order_for_data(i)
+                    trend = pair_state['breakout_trend']
                     self.set_chart_data(ChartDataType.MARKER, 
                                       data_feed_index=i,
-                                      candle_index=self.candle_index, 
+                                      time=current_time,  # Use same timestamp as EMA/support/resistance
                                       price=current_price, 
-                                      marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
+                                      marker_type=ChartMarkerType.RETEST_ORDER_PLACED,
+                                      direction=trend)  # Add trend direction as metadata
+            
             self.invalidate_pending_trades_if_sr_changed_or_completed(i)  
             self.process_pending_trade_updates(i)
+            
+            if current_time is not None and len(ema) > 0:
+                self.set_chart_data(ChartDataType.EMA,
+                                  data_feed_index=i,
+                                  points=[{'time': current_time, 'value': ema[0]}])
+            
+            # Add support and resistance zones when available
+            support_value = pair_state.get('support')
+            resistance_value = pair_state.get('resistance')
+            
+            # Only add support/resistance data if values are meaningful (not None, not 0, and finite)
+            if support_value is not None and support_value != 0 and math.isfinite(float(support_value)):
+                self.set_chart_data(ChartDataType.SUPPORT,
+                                  data_feed_index=i,
+                                  points=[{'time': current_time, 'value': support_value}])
+            
+            if resistance_value is not None and resistance_value != 0 and math.isfinite(float(resistance_value)):
+                self.set_chart_data(ChartDataType.RESISTANCE,
+                                  data_feed_index=i,
+                                  points=[{'time': current_time, 'value': resistance_value}])
             
             # Sync current indicator data to chart for live trading visualization
             if not self._is_backtesting():
