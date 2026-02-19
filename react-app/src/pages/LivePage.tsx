@@ -143,6 +143,10 @@ export default function LivePage() {
       {
         key: 'b',
         action: () => navigate('/')
+      },
+      {
+        key: 's',
+        action: handleStop
       }
     ]
   })

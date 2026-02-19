@@ -355,130 +355,15 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
             import traceback
             traceback.print_exc()
     
-    print(f"DEBUG Strategy: {symbol} - Falling back to enhanced zone calculation")
-    return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
+    print(f"DEBUG Strategy: {symbol} - No zones generated")
+    return {'resistanceSegments': [], 'supportSegments': []}
     
   except Exception as e:
     # If strategy execution fails, use fallback
-    print(f"Warning: BreakoutIndicator failed, using fallback: {e}")
+    print(f"Warning: BreakoutIndicator failed: {e}")
     import traceback
     traceback.print_exc()
-    return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
-
-
-def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
-  """
-  Enhanced fallback zone calculation that mimics BreakoutIndicator behavior.
-  This creates realistic support and resistance zones based on price action.
-  """
-  if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
-  
-  import numpy as np
-  
-  # Calculate ATR for dynamic zone spacing
-  atr_values = []
-  for i in range(1, len(closes)):
-    tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-    atr_values.append(tr)
-  
-  atr_period = min(14, len(atr_values))
-  current_atr = sum(atr_values[-atr_period:]) / atr_period if atr_values else (highs[0] - lows[0]) * 0.02
-  
-  print(f"DEBUG Fallback: {symbol} - Current ATR: {current_atr}")
-  
-  # Find significant swing highs and lows with their actual times
-  resistance_levels = []
-  support_levels = []
-  
-  # Use a swing detection algorithm
-  swing_period = max(5, lookback // 10)  # Dynamic swing period
-  
-  for i in range(swing_period, len(times_s) - swing_period):
-    # Check for swing high (resistance)
-    is_swing_high = True
-    current_high = highs[i]
-    for j in range(i - swing_period, i + swing_period + 1):
-      if j != i and highs[j] >= current_high:
-        is_swing_high = False
-        break
-    
-    if is_swing_high:
-      # Check if this resistance is significant (based on ATR)
-      recent_low = min(lows[max(0, i - swing_period):i + 1])
-      if current_high - recent_low > current_atr * 0.5:  # Significant move
-        resistance_levels.append((current_high, times_s[i]))  # Store level with its actual time
-    
-    # Check for swing low (support)
-    is_swing_low = True
-    current_low = lows[i]
-    for j in range(i - swing_period, i + swing_period + 1):
-      if j != i and lows[j] <= current_low:
-        is_swing_low = False
-        break
-    
-    if is_swing_low:
-      # Check if this support is significant
-      recent_high = max(highs[max(0, i - swing_period):i + 1])
-      if recent_high - current_low > current_atr * 0.5:  # Significant move
-        support_levels.append((current_low, times_s[i]))  # Store level with its actual time
-  
-  # Cluster nearby levels to avoid too many zones
-  def cluster_levels(levels, atr_multiplier=0.5):
-    if not levels:
-      return []
-    
-    clustered = []
-    levels.sort(key=lambda x: x[0])  # Sort by price level
-    
-    for level, time in levels:
-      if not clustered:
-        clustered.append((level, time))
-      else:
-        # Check if this level is far enough from the last clustered level
-        if abs(level - clustered[-1][0]) > current_atr * atr_multiplier:
-          clustered.append((level, time))
-    
-    return clustered
-  
-  resistance_levels = cluster_levels(resistance_levels)
-  support_levels = cluster_levels(support_levels)
-  
-  print(f"DEBUG Fallback: {symbol} - Found {len(resistance_levels)} resistance levels, {len(support_levels)} support levels")
-  
-  # Convert to segments with proper time limits
-  resistance_segments = []
-  support_segments = []
-  
-  # Zone expiration time (in seconds) - zones should expire after some time
-  zone_duration = lookback * 60 * 60  # lookback hours in seconds
-  
-  for level, detection_time in resistance_levels:
-    # Create segment that starts when the level was detected and lasts for zone_duration
-    resistance_segments.append({
-      'startTime': detection_time,
-      'endTime': min(detection_time + zone_duration, times_s[-1]),
-      'value': level + 0.00001  # Small padding
-    })
-  
-  for level, detection_time in support_levels:
-    # Create segment that starts when the level was detected and lasts for zone_duration
-    support_segments.append({
-      'startTime': detection_time,
-      'endTime': min(detection_time + zone_duration, times_s[-1]),
-      'value': level - 0.00001  # Small padding
-    })
-  
-  print(f"DEBUG Fallback: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones")
-  if support_segments:
-    print(f"DEBUG Fallback: Sample support: {support_segments[0]}")
-  if resistance_segments:
-    print(f"DEBUG Fallback: Sample resistance: {resistance_segments[0]}")
-  
-  return {
-    'resistanceSegments': resistance_segments,
-    'supportSegments': support_segments,
-  }
 
 
 def _segments_from_constant_levels(times_s: list[int], values: list[float]) -> list[dict[str, Any]]:

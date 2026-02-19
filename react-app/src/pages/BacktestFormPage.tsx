@@ -272,30 +272,6 @@ export default function BacktestFormPage() {
     dispatch(setAllParams({ ...(schemaInitial || {}), ...mt5Local }))
   }, [dispatch, schemaDefs.length, schemaError, schemaInitial, schemaLoading, restoredFromCookie, params])
 
-  // Use keyboard shortcuts hook
-  useKeyboardShortcuts({
-    shortcuts: [
-      {
-        key: 'r',
-        action: () => {
-          // Create and dispatch a synthetic submit event
-          const form = document.querySelector('form')
-          if (form) {
-            const submitEvent = new Event('submit', { 
-              cancelable: true,
-              bubbles: true 
-            })
-            form.dispatchEvent(submitEvent)
-          }
-        }
-      },
-      {
-        key: 'b',
-        action: () => navigate('/')
-      }
-    ]
-  })
-
   async function onLoadPreset() {
     setPresetError(null)
     const name = presetSelected.trim()
@@ -404,6 +380,35 @@ export default function BacktestFormPage() {
     setRecentLive(next)
     navigate(`/live/${resp.session_id}`)
   }
+
+  // Use keyboard shortcuts hook
+  useKeyboardShortcuts({
+    shortcuts: [
+      {
+        key: 'r',
+        action: () => onSubmit({} as FormEvent)
+      },
+      {
+        key: 'b',
+        action: () => navigate('/')
+      },
+      {
+        key: 'l',
+        action: () => onRunLive({
+          preventDefault: () => {},
+          stopPropagation: () => {}
+        } as MouseEvent)
+      },
+      {
+        key: 's',
+        action: () => {
+          if (activeLiveSessionId) {
+            dispatch(stopLive(activeLiveSessionId))
+          }
+        }
+      }
+    ]
+  })
 
   const filteredGroups = useMemo(() => {
     const q = search.trim().toLowerCase()
