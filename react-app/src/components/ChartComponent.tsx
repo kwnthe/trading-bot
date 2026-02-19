@@ -492,42 +492,9 @@ const mergeOverlappingZones = (segments: any[]) => {
     const resistanceSegments = (cd?.resistance?.points ?? cd?.zones?.resistance ?? sym.zones?.resistanceSegments ?? []) as any[]
     const supportSegments = (cd?.support?.points ?? cd?.zones?.support ?? sym.zones?.supportSegments ?? []) as any[]
     
-    console.log('=== ZONE PROCESSING DEBUG ===')
-    console.log('Data structure check:')
-    console.log('  cd exists:', !!cd)
-    console.log('  cd?.resistance exists:', !!cd?.resistance)
-    console.log('  cd?.resistance?.points exists:', !!cd?.resistance?.points)
-    console.log('  cd?.zones exists:', !!cd?.zones)
-    console.log('  sym.zones exists:', !!sym?.zones)
-    console.log(`Processing ${resistanceSegments.length} resistance and ${supportSegments.length} support segments`)
-    
-    // Debug: Log actual sample data
-    if (resistanceSegments.length > 0) {
-      console.log('Sample resistance segment (raw):', resistanceSegments[0])
-      console.log('Keys:', Object.keys(resistanceSegments[0]))
-    }
-    if (supportSegments.length > 0) {
-      console.log('Sample support segment (raw):', supportSegments[0])
-      console.log('Keys:', Object.keys(supportSegments[0]))
-    }
-    
     // Merge overlapping zones to prevent rendering conflicts
     const mergedResistanceSegments = mergeOverlappingZones(resistanceSegments)
     const mergedSupportSegments = mergeOverlappingZones(supportSegments)
-    
-    console.log(`After merging: ${mergedResistanceSegments.length} resistance and ${mergedSupportSegments.length} support segments`)
-    
-    // Debug: Show first few merged segments
-    if (mergedResistanceSegments.length > 0) {
-      console.log('First merged resistance segment:', mergedResistanceSegments[0])
-      const seg = mergedResistanceSegments[0]
-      console.log('Duration:', seg.endTime - seg.startTime, 'seconds')
-    }
-    if (mergedSupportSegments.length > 0) {
-      console.log('First merged support segment:', mergedSupportSegments[0])
-      const seg = mergedSupportSegments[0]
-      console.log('Duration:', seg.endTime - seg.startTime, 'seconds')
-    }
     
     let zonesRendered = 0
     let zonesSkipped = 0
@@ -536,17 +503,6 @@ const mergeOverlappingZones = (segments: any[]) => {
       const val = Number(seg.value); const s = toTime(seg.startTime); const e = toTime(seg.endTime)
       
       if (s && e && Number.isFinite(val) && s !== e) {
-        // Check for weekend gap (Saturday zones)
-        const startDate = new Date((s as number) * 1000)
-        const endDate = new Date((e as number) * 1000)
-        const isWeekendGap = (startDate.getDay() === 5 && startDate.getHours() >= 21) || (startDate.getDay() === 6) || (startDate.getDay() === 0 && endDate.getDay() === 1)
-        
-        if (isWeekendGap) {
-          console.log('Skipping weekend gap zone:', { startDate: startDate.toISOString(), endDate: endDate.toISOString() })
-          zonesSkipped++
-          continue
-        }
-        
         const zone = chart.addSeries(LineSeries, { color: 'rgba(239, 83, 80, 0.95)', lineWidth: 3, priceLineVisible: false, lastValueVisible: false })
         const zoneData = [{ time: s as Time, value: val }, { time: e as Time, value: val }]
         
@@ -561,17 +517,6 @@ const mergeOverlappingZones = (segments: any[]) => {
       const val = Number(seg.value); const s = toTime(seg.startTime); const e = toTime(seg.endTime)
       
       if (s && e && Number.isFinite(val) && s !== e) {
-        // Check for weekend gap (Saturday zones)
-        const startDate = new Date((s as number) * 1000)
-        const endDate = new Date((e as number) * 1000)
-        const isWeekendGap = (startDate.getDay() === 5 && startDate.getHours() >= 21) || (startDate.getDay() === 6) || (startDate.getDay() === 0 && endDate.getDay() === 1)
-        
-        if (isWeekendGap) {
-          console.log('Skipping weekend gap zone:', { startDate: startDate.toISOString(), endDate: endDate.toISOString() })
-          zonesSkipped++
-          continue
-        }
-        
         const zone = chart.addSeries(LineSeries, { color: 'rgba(33, 150, 243, 0.95)', lineWidth: 3, priceLineVisible: false, lastValueVisible: false })
         const zoneData = [{ time: s as Time, value: val }, { time: e as Time, value: val }]
         
@@ -581,50 +526,6 @@ const mergeOverlappingZones = (segments: any[]) => {
       } else {
         zonesSkipped++
       }
-    }
-    
-    console.log(`Zone rendering complete: ${zonesRendered} rendered, ${zonesSkipped} skipped`)
-    console.log(`Total zone series created: ${zoneSeriesRef.current.length}`)
-    
-    // Debug: Check for overlapping zones at same price level (after merging)
-    const allMergedSegments = [...mergedResistanceSegments, ...mergedSupportSegments]
-    const priceGroups = new Map()
-    
-    allMergedSegments.forEach(seg => {
-      const price = Number(seg.value)
-      if (!priceGroups.has(price)) {
-        priceGroups.set(price, [])
-      }
-      priceGroups.get(price).push(seg)
-    })
-    
-    console.log('=== OVERLAPPING ZONES ANALYSIS (AFTER MERGING) ===')
-    let overlappingZonesFound = 0
-    
-    for (const [price, segments] of priceGroups.entries()) {
-      if (segments.length > 1) {
-        console.log(`⚠️  Found ${segments.length} zones at price ${price}:`)
-        segments.forEach((seg: any, i: number) => {
-          const start = toTime(seg.startTime)
-          const end = toTime(seg.endTime)
-          const duration = (end as number) - (start as number)
-          console.log(`   ${i+1}. ${start} - ${end} (duration: ${duration}s)`)
-        })
-        overlappingZonesFound += segments.length - 1
-      }
-    }
-    
-    if (overlappingZonesFound > 0) {
-      console.log(`⚠️  Total overlapping zones: ${overlappingZonesFound} (may still cause rendering issues)`)
-    } else {
-      console.log('✅ No overlapping zones found after merging')
-    }
-    
-    // Debug: check if zones are actually in the chart
-    if (zoneSeriesRef.current.length > 0) {
-      console.log('✅ Zones successfully added to chart')
-    } else {
-      console.log('❌ No zones were added to chart')
     }
 
     // --- Order Boxes & Markers (Toggleable) ---
