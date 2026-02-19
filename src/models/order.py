@@ -9,6 +9,9 @@ class TradeState(Enum):
     CANCELED = auto()
     SL_HIT = auto()
     TP_HIT = auto()
+    
+    def __str__(self):
+        return self.name
 
 class OrderType(Enum):
     STOP = auto()

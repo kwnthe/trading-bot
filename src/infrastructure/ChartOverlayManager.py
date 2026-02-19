@@ -14,7 +14,8 @@ class ChartOverlayManager:
     
     def __init__(self, json_file_path: str = "chart_overlays.json"):
         self.json_file_path = json_file_path
-        self.overlays: Dict[int, Dict[str, Any]] = {}
+        self.overlays: Dict[int, Dict[int, Dict[str, Any]]] = {}
+        self.trades: List[Dict[str, Any]] = []
         self._load_existing_data()
     
     @classmethod
@@ -29,12 +30,20 @@ class ChartOverlayManager:
             try:
                 with open(self.json_file_path, 'r') as f:
                     loaded_data = json.load(f)
-                    # Convert string keys back to integers
-                    self.overlays = {int(k): {int(data_feed_index): v for data_feed_index, v in data.items()} for k, data in loaded_data.items()}
+                    # Handle new format with overlays and trades
+                    if 'overlays' in loaded_data:
+                        self.overlays = {int(k): {int(data_feed_index): v for data_feed_index, v in data.items()} for k, data in loaded_data['overlays'].items()}
+                        self.trades = loaded_data.get('trades', [])
+                    else:
+                        # Handle old format (backward compatibility)
+                        self.overlays = {int(k): {int(data_feed_index): v for data_feed_index, v in data.items()} for k, data in loaded_data.items()}
+                        self.trades = []
             except (json.JSONDecodeError, IOError):
                 self.overlays = {}
+                self.trades = []
         else:
             self.overlays = {}
+            self.trades = []
     
     def add_overlay_data(self, datetime_number: int, data_type: ChartDataType, data_feed_index: int = 0, **kwargs):
         """
@@ -102,20 +111,68 @@ class ChartOverlayManager:
                     except (ValueError, TypeError):
                         print(f"Warning: Skipping non-numeric {data_type.value} value: {value} at time {datetime_number}")
     
+    def add_trade(self, placed_on: int, executed_on: int = None, closed_on: int = None, closed_on_price: float = None, state: str = None, **kwargs):
+        """
+        Add or update trade data in the trades collection.
+        Can be called multiple times to update the same trade through its lifecycle.
+        
+        Args:
+            placed_on: Unix timestamp when trade was placed (required, used as unique identifier)
+            executed_on: Unix timestamp when trade was executed (optional)
+            closed_on: Unix timestamp when trade was closed (optional)
+            closed_on_price: Price at which trade was closed (optional)
+            state: Trade state as string (optional)
+            **kwargs: Additional trade data
+        """
+        # Look for existing trade with this placed_on timestamp
+        existing_trade = None
+        for i, trade in enumerate(self.trades):
+            if trade.get('placed_on') == placed_on:
+                existing_trade = i
+                break
+        
+        trade_data = {
+            'placed_on': placed_on,
+            **kwargs
+        }
+        
+        # Add optional fields if provided
+        if executed_on is not None:
+            trade_data['executed_on'] = executed_on
+        if closed_on is not None:
+            trade_data['closed_on'] = closed_on
+        if closed_on_price is not None:
+            trade_data['closed_on_price'] = closed_on_price
+        if state is not None:
+            trade_data['state'] = state
+        
+        if existing_trade is not None:
+            # Update existing trade
+            self.trades[existing_trade].update(trade_data)
+        else:
+            # Add new trade
+            self.trades.append(trade_data)
+    
     def save_to_file(self):
-        """Save current overlays to JSON file"""
+        """Save current overlays and trades to JSON file"""
         try:
-            # Sort by datetime for consistent output
+            # Sort overlays by datetime for consistent output
             sorted_overlays = dict(sorted(self.overlays.items()))
             
+            data = {
+                'overlays': sorted_overlays,
+                'trades': self.trades
+            }
+            
             with open(self.json_file_path, 'w') as f:
-                json.dump(sorted_overlays, f, indent=2)
+                json.dump(data, f, indent=2)
         except IOError as e:
             print(f"Warning: Could not save chart overlays to {self.json_file_path}: {e}")
     
     def clear_data(self):
-        """Clear all overlay data"""
+        """Clear all overlay and trade data"""
         self.overlays.clear()
+        self.trades.clear()
         if os.path.exists(self.json_file_path):
             try:
                 os.remove(self.json_file_path)
@@ -129,58 +186,17 @@ class ChartOverlayManager:
             if start_time <= dt <= end_time
         }
     
-    def convert_to_legacy_format(self) -> Dict[str, Any]:
+    def get_raw_data(self) -> Dict[str, Any]:
         """
-        Convert the overlay data to the legacy format expected by the chart rendering system
+        Return the raw overlay and trades data as-is without any conversion
+        Returns:
+            Dict with structure: {overlays: {timestamp: {data_feed_index: {data_type: value}}}, trades: [...]}
         """
-        legacy_data = {
-            'markers': [],
-            'zones': [],
-            'ema': [],
-            'orderBoxes': [],
-            'trades': []
+        return {
+            'overlays': self.overlays,
+            'trades': self.trades
         }
-        
-        for datetime_number, data_dict in self.overlays.items():
-            # data_dict now has data_feed_index as keys
-            for data_feed_index, feed_data in data_dict.items():
-                for param_key, param_data in feed_data.items():
-                    data_type = param_key  # Now just the data type name (ema, support, resistance, marker)
-                    
-                    # Handle markers - now the key is the marker type (e.g., "retest_order_placed")
-                    # Check if it's a marker by excluding known data types
-                    if param_key not in ['ema', 'support', 'resistance']:
-                        if isinstance(param_data, dict) and 'price' in param_data:
-                            marker_data = {
-                                'time': datetime_number,
-                                'price': param_data['price'],
-                                'symbol': data_feed_index,  # Use actual data feed index
-                                'marker': param_key,  # Use the key as the marker type
-                            }
-                            # Add direction if available
-                            if 'direction' in param_data:
-                                marker_data['direction'] = param_data['direction']
-                            legacy_data['markers'].append(marker_data)
-                            
-                    elif data_type in [ChartDataType.SUPPORT.value, ChartDataType.RESISTANCE.value]:
-                        if isinstance(param_data, (int, float)):
-                            legacy_data['zones'].append({
-                                'time': datetime_number,
-                                'price': param_data,
-                                'type': data_type,
-                                'symbol': data_feed_index  # Use actual data feed index
-                            })
-                                
-                    elif data_type == ChartDataType.EMA.value:
-                        if isinstance(param_data, (int, float)):
-                            legacy_data['ema'].append({
-                                'time': datetime_number,
-                                'value': param_data,
-                                'symbol': data_feed_index  # Use actual data feed index
-                            })
-        
-        return legacy_data
-
+    
 # Global instance for use across the application
 _chart_overlay_manager = None
 

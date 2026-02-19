@@ -913,14 +913,15 @@ class BaseStrategy(bt.Strategy):
             return chart_markers[data_feed_index][candle_index]
         return default
     
-    def set_chart_data(self, data_type: ChartDataType, data_feed_index: int = 0, **kwargs):
+    def set_chart_data(self, data_type: ChartDataType, symbol: str = "", data_feed_index: int = 0, **kwargs):
         """
         Set chart data of a specific type. This is the new flexible method for sending
         data from strategies to charts, supporting various data types (markers, lines, zones).
         
         Args:
             data_type: Type of chart data (ChartDataType.MARKER, SUPPORT, RESISTANCE, EMA, ZONE)
-            data_feed_index: Index of the data feed (0 for first symbol, 1 for second, etc.)
+            symbol: Symbol name (e.g., "EURUSD"). If empty, uses data_feed_index fallback
+            data_feed_index: Index of the data feed (0 for first symbol, 1 for second, etc.) - fallback if symbol not provided
             **kwargs: Additional data based on type:
                 - For MARKER: candle_index, price, marker_type
                 - For SUPPORT/RESISTANCE: points (list of {time, value} dicts)
@@ -930,41 +931,51 @@ class BaseStrategy(bt.Strategy):
         Example:
             # Set a retest order marker (replaces set_chart_marker)
             self.set_chart_data(ChartDataType.MARKER, 
+                              symbol="EURUSD",
                               candle_index=self.candle_index, 
                               price=current_price, 
                               marker_type=ChartMarkerType.RETEST_ORDER_PLACED)
             
             # Set support levels
             self.set_chart_data(ChartDataType.SUPPORT,
+                              symbol="EURUSD",
                               points=[{'time': 1234567890, 'value': 1.2500}])
             
             # Set EMA data
             self.set_chart_data(ChartDataType.EMA,
+                              symbol="EURUSD",
                               points=[{'time': t, 'value': v} for t, v in zip(times, ema_values)])
         """
         cerebro = self._get_cerebro()
+        
+        # Determine symbol name - use provided symbol, or fallback to data feed index
+        if not symbol:
+            # Try to get symbol from data feed
+            symbol = self._get_symbol_for_data_feed_index(data_feed_index)
+            if not symbol:
+                symbol = f"symbol_{data_feed_index}"  # Fallback name
         
         # Initialize chart_data structure if needed
         if cerebro is not None:
             if not hasattr(cerebro, 'chart_data'):
                 cerebro.chart_data = {}
-            if data_feed_index not in cerebro.chart_data:
-                cerebro.chart_data[data_feed_index] = {}
+            if symbol not in cerebro.chart_data:
+                cerebro.chart_data[symbol] = {}
         else:
             # Fallback to broker if cerebro not available
             if not hasattr(self.broker, 'chart_data'):
                 self.broker.chart_data = {}
-            if data_feed_index not in self.broker.chart_data:
-                self.broker.chart_data[data_feed_index] = {}
+            if symbol not in self.broker.chart_data:
+                self.broker.chart_data[symbol] = {}
         
         # Get the chart data container
         chart_data = cerebro.chart_data if cerebro is not None else self.broker.chart_data
         
         # Create or get the data container for this type
-        if data_type.value not in chart_data[data_feed_index]:
-            chart_data[data_feed_index][data_type.value] = ChartData(data_type, **kwargs)
+        if data_type.value not in chart_data[symbol]:
+            chart_data[symbol][data_type.value] = ChartData(data_type, **kwargs)
         
-        data_container = chart_data[data_feed_index][data_type.value]
+        data_container = chart_data[symbol][data_type.value]
         
         # Handle different data types
         if data_type == ChartDataType.MARKER:
@@ -991,12 +1002,13 @@ class BaseStrategy(bt.Strategy):
                     candle_index=candle_index
                 )
                 
-                # Writes chart direction on markers (not best design-wise but good for now)           
+                # Write to ChartOverlayManager using new symbol-keyed format
                 overlay_manager = get_chart_overlay_manager()
                 overlay_manager.add_overlay_data(
                     datetime_number=time_value,
                     data_type=data_type,
-                    data_feed_index=data_feed_index,
+                    symbol=symbol,
+                    data_feed_index=data_feed_index,  # Keep for backward compatibility
                     candle_index=candle_index,
                     price=price,
                     marker_type=marker_type,
@@ -1015,7 +1027,7 @@ class BaseStrategy(bt.Strategy):
                         **{k: v for k, v in point.items() if k not in ['time', 'value']}
                     )
             
-            # Write to ChartOverlayManager for dynamic JSON storage
+            # Write to ChartOverlayManager using new symbol-keyed format
             if points:
                 overlay_manager = get_chart_overlay_manager()
                 for point in points:
@@ -1023,10 +1035,64 @@ class BaseStrategy(bt.Strategy):
                         overlay_manager.add_overlay_data(
                             datetime_number=point['time'],
                             data_type=data_type,
-                            data_feed_index=data_feed_index,
+                            symbol=symbol,
+                            data_feed_index=data_feed_index,  # Keep for backward compatibility
                             points=[point]
                         )
                 overlay_manager.save_to_file()
+    
+    def add_chart_trade(self, placed_on: int, executed_on: int = None, closed_on: int = None, closed_on_price: float = None, state = None, **kwargs):
+        """
+        Add or update trade data to chart overlays.
+        Can be called multiple times to update the same trade through its lifecycle.
+        
+        Args:
+            placed_on: Unix timestamp when trade was placed (required, used as unique identifier)
+            executed_on: Unix timestamp when trade was executed (optional)
+            closed_on: Unix timestamp when trade was closed (optional)
+            closed_on_price: Price at which trade was closed (optional)
+            state: Trade state (TradeState enum or string)
+            **kwargs: Additional trade data
+        """
+        # Convert state to string if it's an enum
+        state_str = str(state) if state is not None else None
+        
+        # Write to ChartOverlayManager
+        overlay_manager = get_chart_overlay_manager()
+        overlay_manager.add_trade(
+            placed_on=placed_on,
+            executed_on=executed_on,
+            closed_on=closed_on,
+            closed_on_price=closed_on_price,
+            state=state_str,
+            **kwargs
+        )
+        overlay_manager.save_to_file()
+    
+    def _get_symbol_for_data_feed_index(self, data_feed_index: int = 0) -> str:
+        """
+        Get the symbol name for a given data feed index.
+        This is a helper method for converting data feed indices to symbol names.
+        Returns empty string if symbol cannot be determined.
+        """
+        try:
+            # Try to get symbol from data indicators
+            data_indicators = self._get_data_indicators()
+            if data_feed_index in data_indicators:
+                data_info = data_indicators[data_feed_index]
+                if 'symbol' in data_info:
+                    return data_info['symbol']
+                
+                # Try to get from data feed itself
+                data = data_info['data']
+                if hasattr(data, '_name'):
+                    return data._name
+                elif hasattr(data, 'symbol'):
+                    return data.symbol
+        except Exception:
+            pass
+        
+        return ""  # Return empty string if symbol cannot be determined
     
     def _get_time_for_candle_index(self, candle_index: int, data_feed_index: int = 0) -> int | None:
         """

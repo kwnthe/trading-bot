@@ -58,22 +58,38 @@ export interface ResultJson {
       markers?: Array<{ time: number; value: number; type: string; color: string; size: number }>
     }
     chartOverlayData?: {
-      [timestamp: string]: {
-        [symbolIndex: string]: {
-          ema?: number
-          support?: number
-          resistance?: number
-          retest_order_placed?: {
-            price: number
-            time: number
-            direction: string
+      data?: {
+        [symbol: string]: {
+          [timestamp: string]: {
+            ema?: number
+            support?: number
+            resistance?: number
+            [other_marker_name: string]: any
           }
-          // Add other properties as needed
         }
+      }
+      trades?: {
+        [data_index: number]: Array<{
+          placed_on: number
+          executed_on?: number
+          closed_on?: number
+          closed_on_price?: number
+          state: string
+          symbol?: string
+          entry_price?: number
+          entry_executed_price?: number
+          sl?: number
+          tp?: number
+          trade_id?: string
+          order_side?: string
+          size?: number
+          exit_type?: string
+          close_reason?: string
+        }>
       }
     }
     markers?: any[]
     orderBoxes?: Array<{ openTime: number | string; closeTime: number | string; entry: number; sl: number; tp: number; closeReason?: string }>
   }>
   stats?: Record<string, any>
-}
+}[]

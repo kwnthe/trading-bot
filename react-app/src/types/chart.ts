@@ -57,9 +57,33 @@ export interface ChartEMAPoint {
 }
 
 export interface ChartOverlayData {
-  ema: ChartEMAPoint[]
-  zones: ChartZones
-  markers: ChartMarker[]
-  orderBoxes: ChartOrderBox[]
-  trades: any[]  // Keep existing trade format for now
+  data?: {
+    [symbol: string]: {
+      [unix_timestamp: string]: {
+        ema?: number
+        support?: number
+        resistance?: number
+        [other_marker_name: string]: any
+      }
+    }
+  }
+  trades?: {
+    [data_index: number]: Array<{
+      placed_on: number
+      executed_on?: number
+      closed_on?: number
+      closed_on_price?: number
+      state: string
+      symbol?: string
+      entry_price?: number
+      entry_executed_price?: number
+      sl?: number
+      tp?: number
+      trade_id?: string
+      order_side?: string
+      size?: number
+      exit_type?: string
+      close_reason?: string
+    }>
+  }
 }

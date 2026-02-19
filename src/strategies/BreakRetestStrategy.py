@@ -368,7 +368,20 @@ class BreakRetestStrategy(BaseStrategy):
 
         # Log pending  
         self.log_trade(TradeState.PENDING, self.candle_index, side,  
-                    f"[{symbol}] Entry: {format_price(entry_price)}, Size: {size}, TP: {format_price(tp)}, SL: {format_price(sl)}, Risk: {format_price(risk_amount)}")  
+                    f"[{symbol}] Entry: {format_price(entry_price)}, Size: {size}, TP: {format_price(tp)}, SL: {format_price(sl)}, Risk: {format_price(risk_amount)}")
+        
+        # Add trade to chart overlays - PLACEMENT stage
+        self.add_chart_trade(
+            placed_on=int(current_datetime.timestamp()),
+            state=TradeState.PENDING,
+            trade_id=trade_id,
+            symbol=symbol,
+            order_side=side.name,  # Convert enum to string
+            entry_price=entry_price,
+            size=size,
+            tp=tp,
+            sl=sl
+        )  
 
     # ----------------------- INVALIDATE PENDING FOR SPECIFIC DATA FEED -----------------------  
     def invalidate_pending_trades_if_sr_changed_or_completed(self, data_index):
@@ -422,6 +435,20 @@ class BreakRetestStrategy(BaseStrategy):
             self.trades[trade_id]['close_reason'] = 'CANCELED'
             self.trades[trade_id]['close_candle'] = self.candle_index
             # Get datetime
+            data_index = trade.get('data_index', 0)
+            data_indicators = self._get_data_indicators()
+            if data_index in data_indicators and 'data' in data_indicators[data_index]:
+                current_datetime = data_indicators[data_index]['data'].datetime.datetime(0)
+            else:
+                current_datetime = self.data.datetime.datetime(0)
+            
+            # Add trade to chart overlays - CANCELLATION stage
+            self.add_chart_trade(
+                placed_on=int(trade['placed_datetime'].timestamp()),
+                state=TradeState.CANCELED,
+                trade_id=trade_id,
+                close_reason='CANCELED'
+            )
             data_index = trade.get('data_index')
             data_indicators = self._get_data_indicators()
             if data_index is not None and data_index in data_indicators:
@@ -535,6 +562,15 @@ class BreakRetestStrategy(BaseStrategy):
                     trade_record["order_side"],
                     f"{symbol_str}Main Order Filled | Entry={order.executed.price} | Size={order.executed.size}"
                 )
+                
+                # Add trade to chart overlays - EXECUTION stage
+                self.add_chart_trade(
+                    placed_on=int(trade_record['placed_datetime'].timestamp()),
+                    executed_on=int(current_datetime.timestamp()),
+                    state=TradeState.RUNNING,
+                    trade_id=order.trade_id,
+                    entry_executed_price=order.executed.price
+                )
                 trade_record['time_to_fill'] = self.candle_index - trade_record['placed_candle'] + 1
                 # We have to convert highest_excursion_from_breakout to atr_rel_excursion
                 atr = data_indicators[data_index]['atr']
@@ -557,7 +593,30 @@ class BreakRetestStrategy(BaseStrategy):
 
     def _handle_trade_exit(self, order, trade_record, trade_state, counter_key, exit_type):
         """Handle trade exit (TP or SL) with common logic."""
+        # Get current datetime
+        data_index = trade_record.get('data_index', 0)
+        data_indicators = self._get_data_indicators()
+        if data_index in data_indicators and 'data' in data_indicators[data_index]:
+            current_datetime = data_indicators[data_index]['data'].datetime.datetime(0)
+        else:
+            current_datetime = self.data.datetime.datetime(0)
+        
         exit_price = order.executed.price
+        # Use executed entry price if available, otherwise fall back to order price
+        entry_price = trade_record.get('entry_executed_price', trade_record.get('entry_price'))
+        # Use executed exit price if available, otherwise fall back to order price
+        exit_executed_price = order.executed.price if order.executed else exit_price
+        
+        # Add trade to chart overlays - CLOSING stage
+        self.add_chart_trade(
+            placed_on=int(trade_record['placed_datetime'].timestamp()),
+            executed_on=int(trade_record.get('open_datetime').timestamp()) if trade_record.get('open_datetime') else None,
+            closed_on=int(current_datetime.timestamp()),
+            closed_on_price=exit_executed_price,
+            state=trade_state,
+            trade_id=trade_record['trade_id'],
+            exit_type=exit_type
+        )
         # Use executed entry price if available, otherwise fall back to order price
         entry_price = trade_record.get('entry_executed_price') or trade_record.get("entry_price")
         size = abs(trade_record["size"])

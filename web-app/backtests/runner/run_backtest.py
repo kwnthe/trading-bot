@@ -185,11 +185,9 @@ def main() -> int:
 
             # Get chart overlay data from ChartOverlayManager (dynamic JSON storage)
             overlay_manager = get_chart_overlay_manager()
-            overlay_data = overlay_manager.convert_to_legacy_format()
-            
-            # Filter trades for this specific symbol
-            symbol_trades = [t for t in overlay_data["trades"] if t.get("symbol") == symbol]
-            overlay_data["trades"] = symbol_trades
+            overlay_data = overlay_manager.get_raw_data()
+            overlays = overlay_data.get('overlays', {})
+            trades = overlay_data.get('trades', [])
 
             # Calculate actual candle duration from the data (instead of static 3600)
             if len(candles) >= 2:
@@ -197,25 +195,41 @@ def main() -> int:
             else:
                 candle_duration = 3600  # Fallback to 1 hour if insufficient data
 
-            # Prepare chart data for frontend using utility functions
-            chart_data = prepare_chart_data_for_frontend(overlay_data, timeframe_seconds=candle_duration)
-
             out_symbols[symbol] = {
                 "candles": candles,
                 "chartOverlayData": {
-                    "ema": {
-                        "points": chart_data["ema_points"]
-                    },
-                    "resistance": {
-                        "points": chart_data["resistance_segments"]
-                    },
-                    "support": {
-                        "points": chart_data["support_segments"]
-                    },
-                    "markers": chart_data["markers"]
+                    symbol: overlays.get("data", {})
                 },
-                "orderBoxes": chart_data["order_boxes"],
-                "trades": chart_data["trades"],
+                "orderBoxes": [],
+                "trades": trades,
+            }
+
+        # Transform the chartOverlayData to the new symbol-keyed format
+        for symbol_name, symbol_index in zip(symbols, range(len(symbols))):
+            new_data = {}
+            
+            # Convert raw format: timestamp -> data_feed_index -> values
+            # to new format: symbol -> timestamp -> values
+            for timestamp, feed_data in overlays.items():
+                if isinstance(feed_data, dict) and symbol_index in feed_data:
+                    new_data[timestamp] = feed_data[symbol_index]
+            
+            # Organize trades by data feed index for this symbol
+            trades_by_data_feed = {}
+            for trade in trades:
+                # Only include trades for this symbol
+                if trade.get('symbol') == symbol_name:
+                    # Determine data feed index based on symbol position
+                    data_feed_index = symbol_index
+                    if data_feed_index not in trades_by_data_feed:
+                        trades_by_data_feed[data_feed_index] = []
+                    trades_by_data_feed[data_feed_index].append(trade)
+            
+            out_symbols[symbol_name]["chartOverlayData"] = {
+                "data": {
+                    symbol_name: new_data
+                },
+                "trades": trades_by_data_feed
             }
 
         payload = {

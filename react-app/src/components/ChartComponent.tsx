@@ -14,6 +14,7 @@ import {
 } from 'lightweight-charts'
 
 import { sortAndDedupByTime, toTime } from '../utils/timeSeries'
+import { createContinuousSegments, mergeOverlappingZones } from '../utils/chartSegments'
 import type { ResultJson } from '../api/types'
 import type { ChartMarker } from '../types/chart'
 
@@ -166,11 +167,8 @@ export default function ChartComponent({ result, symbol }: Props) {
   const [chartMountId, setChartMountId] = useState(0)
   const exitFsTimerRef = useRef<number | null>(null)
 
-  const [showTpSlMarkers, setShowTpSlMarkers] = useState(() => {
-    return getCookie('showTpSlMarkers') === '' ? true : getCookie('showTpSlMarkers') === 'true'
-  })
-  const [showRetestOrders, setShowRetestOrders] = useState(() => {
-    return getCookie('showRetestOrders') === '' ? true : getCookie('showRetestOrders') === 'true'
+  const [showTrades, setShowTrades] = useState(() => {
+    return getCookie('showTrades') === '' ? true : getCookie('showTrades') === 'true'
   })
   // ---------- TOGGLE STATES ----------
   const [isDark, setIsDark] = useState(() => {
@@ -181,10 +179,6 @@ export default function ChartComponent({ result, symbol }: Props) {
 
   const [showIndexes, setShowIndexes] = useState(() => {
     return getCookie('candleIndexes') === 'true'
-  })
-
-  const [showTrades, setShowTrades] = useState(() => {
-    return getCookie('showTrades') === '' ? true : getCookie('showTrades') === 'true'
   })
 
   const theme = useMemo(() => isDark
@@ -245,7 +239,12 @@ export default function ChartComponent({ result, symbol }: Props) {
     } catch {}
   }
 
-  // ---------------- CREATE CHART ----------------
+  // ---------------- OPACITY SETTINGS ----------------
+  const RESULT_BOX_OPACITY = 0.3    // Opacity for the "winning" side (TP for profitable, SL for losing)
+  const NON_RESULT_BOX_OPACITY = 0.07 // Opacity for the "losing" side (very faint)
+  const DEFAULT_BOX_OPACITY = 0.1    // Opacity for other states (PENDING, RUNNING, CANCELED)
+
+  // ---------------- STATE & REFS ----------------
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -411,15 +410,66 @@ export default function ChartComponent({ result, symbol }: Props) {
 
     // API may send chart_data (snake_case) or chartOverlayData (camelCase); support both and nested vs .points
     const cd = sym.chartOverlayData ?? (sym as any).chart_overlay_data ?? sym.chartData ?? (sym as any).chart_data
-    const emaSource = cd?.indicators?.ema ?? cd?.ema?.points ?? sym.ema ?? []
-    const emaData = (emaSource as any[])
-      .map((p: any) => {
-        const time = toTime(p.time)
-        const value = Number(p.value)
-        if (!time || !Number.isFinite(value)) return null
-        return { time: time as Time, value }
-      })
-      .filter(Boolean) as any
+    
+    // Handle new data format (timestamp-keyed) or legacy format
+    let emaData: any[] = []
+    let resistanceSegments: any[] = []
+    let supportSegments: any[] = []
+    let markerData: any[] = []
+    
+    if (cd?.data && typeof cd.data === 'object') {
+      // New format: symbol-keyed data
+      const symbolData = cd.data[symbol]
+      if (symbolData && typeof symbolData === 'object') {
+        // Convert timestamp-keyed data to arrays for this specific symbol
+        emaData = Object.entries(symbolData)
+          .filter(([_, data]: [string, any]) => data.ema !== undefined && data.ema !== null)
+          .map(([timestamp, data]: [string, any]) => {
+            const time = toTime(parseInt(timestamp))
+            const value = Number(data.ema)
+            return time && Number.isFinite(value) ? { time: time as Time, value } : null
+          })
+          .filter(Boolean)
+        
+        // For zones, we need to convert point data to segments (this is a simplified approach)
+        // In the new format, we might need to aggregate consecutive points with the same value
+        const resistancePoints = Object.entries(symbolData)
+          .filter(([_, data]: [string, any]) => data.resistance !== undefined && data.resistance !== null)
+          .map(([timestamp, data]: [string, any]) => ({
+            time: parseInt(timestamp),
+            value: Number(data.resistance)
+          }))
+          .filter(p => Number.isFinite(p.value))
+        
+        const supportPoints = Object.entries(symbolData)
+          .filter(([_, data]: [string, any]) => data.support !== undefined && data.support !== null)
+          .map(([timestamp, data]: [string, any]) => ({
+            time: parseInt(timestamp),
+            value: Number(data.support)
+          }))
+          .filter(p => Number.isFinite(p.value))
+        
+        // Convert points to continuous segments using utility function
+        resistanceSegments = createContinuousSegments(resistancePoints)
+        supportSegments = createContinuousSegments(supportPoints)
+        
+        // Extract markers from the new data format
+        markerData = []
+        Object.entries(symbolData).forEach(([timestamp, data]: [string, any]) => {
+          Object.entries(data).forEach(([key, value]: [string, any]) => {
+            if (key !== 'ema' && key !== 'support' && key !== 'resistance' && typeof value === 'object' && value !== null) {
+              // This looks like a marker object
+              markerData.push({
+                time: parseInt(timestamp),
+                type: key,
+                ...value
+              })
+            }
+          })
+        })
+      }
+    }
+    
     ema.setData(emaData)
 
     // Merge overlapping zones at the same price level to prevent rendering conflicts
@@ -488,10 +538,7 @@ const mergeOverlappingZones = (segments: any[]) => {
   return mergedSegments
 }
 
-// Resistance/Support - chartOverlayData.*.points or legacy sym.zones
-    const resistanceSegments = (cd?.resistance?.points ?? cd?.zones?.resistance ?? sym.zones?.resistanceSegments ?? []) as any[]
-    const supportSegments = (cd?.support?.points ?? cd?.zones?.support ?? sym.zones?.supportSegments ?? []) as any[]
-    
+    // Resistance/Support - use the data we already processed above
     // Merge overlapping zones to prevent rendering conflicts
     const mergedResistanceSegments = mergeOverlappingZones(resistanceSegments)
     const mergedSupportSegments = mergeOverlappingZones(supportSegments)
@@ -530,13 +577,37 @@ const mergeOverlappingZones = (segments: any[]) => {
 
     // --- Order Boxes & Markers (Toggleable) ---
     const allMarkers: SeriesMarker<Time>[] = []
-    const tpPointData: { time: Time; value: number }[] = []
-    const slPointData: { time: Time; value: number }[] = []
-
-    // Process markers - support both new format (direct keys) and legacy format
-    const rawMarkers = cd?.markers
-    const markerData = Array.isArray(rawMarkers) ? rawMarkers : (rawMarkers?.points ?? [])
     
+    // Convert trades to order boxes format
+    const orderBoxes = (() => {
+      const chartData = sym.chartOverlayData
+      if (!chartData?.trades || typeof chartData.trades !== 'object') return []
+      
+      // Determine data feed index for this symbol
+      // For now, assume symbol order corresponds to data feed index
+      // This could be enhanced with proper symbol mapping if needed
+      const symbols = Object.keys(result?.symbols || {})
+      const dataFeedIndex = symbols.indexOf(symbol)
+      
+      const trades = chartData.trades[dataFeedIndex] || []
+      
+      return trades
+        .filter((trade: any) => 
+          trade.placed_on && 
+          trade.executed_on && 
+          trade.closed_on
+        )
+        .map((trade: any) => ({
+          openTime: trade.executed_on,
+          closeTime: trade.closed_on,
+          entry: trade.entry_executed_price || trade.entry_price,
+          sl: trade.sl,
+          tp: trade.tp,
+          closeReason: trade.state // TP_HIT, SL_HIT, CANCELED
+        }))
+    })()
+
+    // Process markers - use the markerData we already processed above
     for (const marker of markerData) {
       // Check if this is the new format (has 'type' field)
       if (marker.type && typeof marker.type === 'string') {
@@ -582,23 +653,13 @@ const mergeOverlappingZones = (segments: any[]) => {
     }
 
     if (showTrades) {
-      for (const b of sym.orderBoxes || []) {
+      for (const b of orderBoxes) {
         const openTime = toTime(b.openTime); const closeTime = toTime(b.closeTime)
         if (!openTime || !closeTime) continue
 
         const entry = Number(b.entry); const sl = Number(b.sl); const tp = Number(b.tp)
         const reason = String(b.closeReason || '')
 
-        // Markers
-        if (showTpSlMarkers) {
-          if (reason === 'TP') {
-            if (Number.isFinite(tp)) tpPointData.push({ time: closeTime as Time, value: tp })
-          } else if (reason === 'SL') {
-            if (Number.isFinite(sl)) slPointData.push({ time: closeTime as Time, value: sl })
-          }
-        }
-
-        // Boxes
         const { sl: slC, tp: tpC } = colorsForCloseReason(reason)
         const slS = chart.addSeries(BaselineSeries, { baseValue: { type: 'price', price: entry }, topFillColor1: slC, topFillColor2: slC, bottomFillColor1: slC, bottomFillColor2: slC, topLineColor: 'rgba(0,0,0,0)', bottomLineColor: 'rgba(0,0,0,0)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
         slS.setData([{ time: openTime as Time, value: sl }, { time: closeTime as Time, value: sl }])
@@ -693,38 +754,14 @@ const mergeOverlappingZones = (segments: any[]) => {
       }
     }
 
-    const tpDedup = showTpSlMarkers ? dedupPointsByTime(tpPointData) : []
-    const slDedup = showTpSlMarkers ? dedupPointsByTime(slPointData) : []
+    tpPoints.setData([])
+    slPoints.setData([])
 
-    tpPoints.setData(tpDedup)
-    slPoints.setData(slDedup)
+    tpLabels.setData([])
+    slLabels.setData([])
 
-    tpLabels.setData(
-      tpDedup.map((p) => ({ time: p.time, open: p.value, high: p.value, low: p.value, close: p.value }))
-    )
-    slLabels.setData(
-      slDedup.map((p) => ({ time: p.time, open: p.value, high: p.value, low: p.value, close: p.value }))
-    )
-
-    // Labels anchored to TP/SL series points
-    tpMarkersRef.current?.setMarkers(
-      tpDedup.map((p) => ({
-        time: p.time,
-        position: 'inBar',
-        color: '#089981',
-        shape: 'circle',
-        text: '✅',
-      }))
-    )
-    slMarkersRef.current?.setMarkers(
-      slDedup.map((p) => ({
-        time: p.time,
-        position: 'inBar',
-        color: '#f23645',
-        shape: 'circle',
-        text: '❌',
-      }))
-    )
+    tpMarkersRef.current?.setMarkers([])
+    slMarkersRef.current?.setMarkers([])
 
     allMarkers.sort((a, b) => (a.time as number) - (b.time as number))
     markers.setMarkers(allMarkers)
@@ -733,7 +770,7 @@ const mergeOverlappingZones = (segments: any[]) => {
       chart.timeScale().fitContent()
       didFitRef.current = true
     }
-  }, [sym, chartMountId, showIndexes, showTrades, showTpSlMarkers, showRetestOrders, precision, minMove])
+  }, [sym, chartMountId, showIndexes, showTrades, precision, minMove])
 
   // ---------------- THEME & TOGGLES ----------------
   useEffect(() => {
@@ -751,13 +788,30 @@ const mergeOverlappingZones = (segments: any[]) => {
   const toggleTheme = () => setIsDark(v => { const n = !v; setCookie('chartTheme', n ? 'dark' : 'light'); return n })
   const toggleIndexes = () => setShowIndexes(v => { const n = !v; setCookie('candleIndexes', String(n)); return n })
   const toggleTrades = () => setShowTrades(v => { const n = !v; setCookie('showTrades', String(n)); return n })
-  const toggleTpSlMarkers = () => setShowTpSlMarkers(v => { const n = !v; setCookie('showTpSlMarkers', String(n)); return n })
-  const toggleRetestOrders = () => setShowRetestOrders(v => { const n = !v; setCookie('showRetestOrders', String(n)); return n })
 
   const colorsForCloseReason = (reason: string) => {
-    if (reason === 'TP') return { sl: 'rgba(242,54,69,0.05)', tp: 'rgba(8,153,129,0.25)' }
-    if (reason === 'SL') return { sl: 'rgba(242,54,69,0.25)', tp: 'rgba(8,153,129,0.05)' }
-    return { sl: 'rgba(242,54,69,0.1)', tp: 'rgba(8,153,129,0.1)' }
+    console.log('DEBUG: closeReason:', reason)
+    if (reason === 'TP_HIT') return { 
+      sl: `rgba(242,54,69,${NON_RESULT_BOX_OPACITY})`, 
+      tp: `rgba(8,153,129,${RESULT_BOX_OPACITY})`  
+    }  // TP wins, SL loses
+    if (reason === 'SL_HIT') return { 
+      sl: `rgba(242,54,69,${RESULT_BOX_OPACITY})`, 
+      tp: `rgba(8,153,129,${NON_RESULT_BOX_OPACITY})`  
+    }  // SL wins, TP loses
+    if (reason === 'TP') return { 
+      sl: `rgba(242,54,69,${NON_RESULT_BOX_OPACITY})`, 
+      tp: `rgba(8,153,129,${RESULT_BOX_OPACITY})`  
+    }  // Fallback for 'TP'
+    if (reason === 'SL') return { 
+      sl: `rgba(242,54,69,${RESULT_BOX_OPACITY})`, 
+      tp: `rgba(8,153,129,${NON_RESULT_BOX_OPACITY})`  
+    }  // Fallback for 'SL'
+    console.log('DEBUG: Using default colors for reason:', reason)
+    return { 
+      sl: `rgba(242,54,69,${DEFAULT_BOX_OPACITY})`, 
+      tp: `rgba(8,153,129,${DEFAULT_BOX_OPACITY})` 
+    }
   }
 
   const btnStyle = {
@@ -778,8 +832,6 @@ const mergeOverlappingZones = (segments: any[]) => {
         <button onClick={toggleFullscreen} style={btnStyle} title="Fullscreen" type="button"><span>⛶</span></button>
         <button onClick={toggleTheme} style={btnStyle} type="button"><span>{isDark ? '☀️' : '🌙'}</span></button>
         <button onClick={toggleTrades} style={activeBtn(showTrades)} title="Toggle trades" type="button"><span>📦</span></button>
-        <button onClick={toggleTpSlMarkers} style={activeBtn(showTpSlMarkers)} title="Toggle TP/SL markers" type="button"><span>✅</span></button>
-        <button onClick={toggleRetestOrders} style={activeBtn(showRetestOrders)} title="Toggle retest orders" type="button"><span>📌</span></button>
         <button onClick={toggleIndexes} style={activeBtn(showIndexes)} title="Toggle Candle Index" type="button"><span>🔢</span></button>
       </div>
       <div key={chartMountId} ref={containerRef} style={{ width: '100%', height: '100%' }} />
