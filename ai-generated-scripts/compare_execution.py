@@ -15,7 +15,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 # Suppress loguru INFO logs
 logging.getLogger('loguru').setLevel(logging.WARNING)
 
-from utils.config import Config, load_config
+from src.utils.config import Config, load_config
 from data.csv_data_feed import CSVDataFeed
 from strategies.BreakRetestStrategy import BreakRetestStrategy
 from indicators.TestIndicator import TestIndicator

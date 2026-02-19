@@ -5,6 +5,7 @@ __pycache__/
 .DS_Store
 zones.html
 zones_local.html
+wip.html
 
 # C extensions
 *.so

@@ -7,7 +7,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 from bks.breakout import convert_pips_to_price
-from utils.config import Config, load_config
+from src.utils.config import Config, load_config
 from src.utils.strategy_utils.general_utils import convert_micropips_to_price
 
 def analyze():

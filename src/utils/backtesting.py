@@ -15,7 +15,7 @@ if _root_dir not in sys.path:
 # Platform-specific imports
 if sys.platform == "win32":
     import MetaTrader5 as mt5
-    from src.data.fetch import fetch_candles
+    from data.fetch import fetch_candles
 else:
     # On Mac/Linux, use remote server to fetch data
     # Use absolute import since we're in src/utils
@@ -31,7 +31,7 @@ else:
     from fetch_client import fetch_from_server
 
 # Import CSV filename generator from fetch_constants
-from fetch_constants import generate_csv_filename as _generate_csv_filename_base
+from data.fetch_constants import generate_csv_filename as _generate_csv_filename_base
 
 
 def _is_valid_ohlc_csv(file_path: Path) -> bool:

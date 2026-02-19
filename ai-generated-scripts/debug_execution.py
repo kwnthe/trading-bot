@@ -9,7 +9,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 from bks.breakout import convert_pips_to_price
-from utils.config import Config, load_config
+from src.utils.config import Config, load_config
 from data.csv_data_feed import CSVDataFeed
 from strategies.BreakRetestStrategy import BreakRetestStrategy
 from indicators.TestIndicator import TestIndicator
