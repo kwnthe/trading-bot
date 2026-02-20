@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # .../web-app
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-change-me")
 DEBUG = True
-ALLOWED_HOSTS: list[str] = ["*"]
+ALLOWED_HOSTS: list[str] = ["*", "localhost", "127.0.0.1"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -15,6 +15,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "backtests",
 ]
 
@@ -47,6 +48,14 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "trading_dashboard.wsgi.application"
+ASGI_APPLICATION = "trading_dashboard.asgi.application"
+
+# Channel layer configuration
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
+}
 
 DATABASES = {
     "default": {

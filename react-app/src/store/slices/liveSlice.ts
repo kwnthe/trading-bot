@@ -2,6 +2,7 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 import type { PayloadAction } from '@reduxjs/toolkit'
 import { apiFetchJson } from '../../api/client'
 import type { ResultJson } from '../../api/types'
+import { liveChartWebSocket, type ChartUpdateMessage, type ConnectionMessage, type ErrorMessage } from '../../services/websocketService'
 
 export type StrategyInfo = {
   id: string
@@ -44,6 +45,8 @@ export type LiveState = {
   snapshot: ResultJson | null
   loading: boolean
   error: string | null
+  websocketConnected: boolean
+  websocketError: string | null
 }
 
 const initialState: LiveState = {
@@ -54,6 +57,8 @@ const initialState: LiveState = {
   snapshot: null,
   loading: false,
   error: null,
+  websocketConnected: false,
+  websocketError: null,
 }
 
 export const fetchStrategies = createAsyncThunk('live/fetchStrategies', async () => {
@@ -91,6 +96,41 @@ export const stopLive = createAsyncThunk('live/stop', async (sessionId: string) 
   return { sessionId, ...data }
 })
 
+export const connectWebSocket = createAsyncThunk(
+  'live/connectWebSocket',
+  async (sessionId: string, { dispatch, rejectWithValue }) => {
+    try {
+      await liveChartWebSocket.connect(sessionId)
+      
+      // Set up message handlers
+      liveChartWebSocket.onMessage('chart_update', (message: ChartUpdateMessage) => {
+        dispatch(updateSnapshotWithWebSocketData(message.data))
+      })
+      
+      liveChartWebSocket.onMessage('connection_established', (message: ConnectionMessage) => {
+        console.log('WebSocket connection established:', message.message)
+      })
+      
+      liveChartWebSocket.onMessage('error', (message: ErrorMessage) => {
+        dispatch(setWebSocketError(message.message))
+      })
+      
+      // Set up connection status handler
+      liveChartWebSocket.onConnectionStatus((connected: boolean) => {
+        dispatch(setWebSocketConnectionStatus(connected))
+      })
+      
+      return sessionId
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Failed to connect WebSocket')
+    }
+  }
+)
+
+export const disconnectWebSocket = createAsyncThunk('live/disconnectWebSocket', async () => {
+  liveChartWebSocket.disconnect()
+})
+
 const liveSlice = createSlice({
   name: 'live',
   initialState,
@@ -110,6 +150,40 @@ const liveSlice = createSlice({
       state.snapshot = null
       state.loading = false
       state.error = null
+      state.websocketConnected = false
+      state.websocketError = null
+    },
+    setWebSocketConnectionStatus(state, action: PayloadAction<boolean>) {
+      state.websocketConnected = action.payload
+      if (action.payload) {
+        state.websocketError = null
+      }
+    },
+    setWebSocketError(state, action: PayloadAction<string | null>) {
+      state.websocketError = action.payload
+      state.websocketConnected = false
+    },
+    updateSnapshotWithWebSocketData(state, action: PayloadAction<any>) {
+      // Update snapshot with WebSocket data
+      if (!state.snapshot) {
+        state.snapshot = {
+          stats: {},
+          symbols: {},
+        }
+      }
+      
+      const data = action.payload
+      const symbol = data.symbol
+      
+      if (symbol && data.chartData && state.snapshot.symbols) {
+        // Update or add symbol data
+        state.snapshot.symbols[symbol] = {
+          ...state.snapshot.symbols[symbol],
+          candles: data.candles || [],
+          chartData: data.chartData,
+          chartOverlayData: data.chartOverlayData,
+        }
+      }
     },
   },
   extraReducers: (builder) => {
@@ -161,8 +235,31 @@ const liveSlice = createSlice({
       .addCase(stopLive.rejected, (state, action) => {
         state.error = action.error.message || 'Failed to stop live session'
       })
+      .addCase(connectWebSocket.pending, (state) => {
+        state.websocketError = null
+      })
+      .addCase(connectWebSocket.fulfilled, (state, action) => {
+        // Connection status is handled by the connection status handler
+        console.log('WebSocket connection initiated for session:', action.payload)
+      })
+      .addCase(connectWebSocket.rejected, (state, action) => {
+        state.websocketError = action.payload as string
+        state.websocketConnected = false
+      })
+      .addCase(disconnectWebSocket.fulfilled, (state) => {
+        state.websocketConnected = false
+        state.websocketError = null
+      })
   },
 })
 
-export const { setSelectedStrategyId, setActiveSessionId, clearLiveError, resetLive } = liveSlice.actions
+export const { 
+  setSelectedStrategyId, 
+  setActiveSessionId, 
+  clearLiveError, 
+  resetLive,
+  setWebSocketConnectionStatus,
+  setWebSocketError,
+  updateSnapshotWithWebSocketData
+} = liveSlice.actions
 export default liveSlice.reducer

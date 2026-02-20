@@ -6,7 +6,14 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import ChartsContainer from '../components/ChartsContainer'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
-import { fetchLiveSnapshot, fetchLiveStatus, setActiveSessionId, stopLive } from '../store/slices/liveSlice'
+import { 
+  fetchLiveSnapshot, 
+  fetchLiveStatus, 
+  setActiveSessionId, 
+  stopLive,
+  connectWebSocket,
+  disconnectWebSocket
+} from '../store/slices/liveSlice'
 import { fetchParamSchema } from '../store/slices/paramSchemaSlice'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'
 
@@ -31,6 +38,8 @@ export default function LivePage() {
   const status = useAppSelector((s) => s.live.status)
   const snapshot = useAppSelector((s) => s.live.snapshot)
   const error = useAppSelector((s) => s.live.error)
+  const websocketConnected = useAppSelector((s) => s.live.websocketConnected)
+  const websocketError = useAppSelector((s) => s.live.websocketError)
 
   const schemaDefs = useAppSelector((s) => s.paramSchema.defs)
 
@@ -98,16 +107,63 @@ export default function LivePage() {
   useEffect(() => {
     if (!sessionId) return
     dispatch(setActiveSessionId(sessionId))
-  }, [dispatch, sessionId])
-
-  useEffect(() => {
-    if (!sessionId) return
+    
+    // Initial fetch on component mount
     dispatch(fetchLiveStatus(sessionId))
     dispatch(fetchLiveSnapshot(sessionId))
+    dispatch(connectWebSocket(sessionId))
   }, [dispatch, sessionId])
 
-  const polling = status?.state === 'running' || status?.state === 'queued'
+  const polling = (status?.state === 'running' || status?.state === 'queued') && !websocketConnected
   const canStop = Boolean(sessionId) && (status?.state === 'running' || status?.state === 'queued')
+  
+  // Detect when a new session starts and fetch data with retry logic
+  const previousState = useRef<string | null>(null)
+  const hasFetchedForSession = useRef<Set<string>>(new Set())
+  const retryCount = useRef<Map<string, number>>(new Map())
+  
+  useEffect(() => {
+    const currentState = status?.state || null
+    const currentSessionId = sessionId || null
+    const prevState = previousState.current
+    
+    // Function to fetch data with retry logic
+    const fetchDataWithRetry = async (sessionKey: string) => {
+      if (!currentSessionId) return
+      
+      try {
+        const snapshotResult = await dispatch(fetchLiveSnapshot(currentSessionId)).unwrap()
+        
+        // If snapshot is empty and session is running, retry
+        if ((!snapshotResult.symbols || Object.keys(snapshotResult.symbols).length === 0) && 
+            currentState === 'running') {
+          const currentRetries = retryCount.current.get(sessionKey) || 0
+          if (currentRetries < 5) {
+            retryCount.current.set(sessionKey, currentRetries + 1)
+            setTimeout(() => fetchDataWithRetry(sessionKey), 2000)
+          }
+        } else {
+          // Success - reset retry count
+          retryCount.current.delete(sessionKey)
+        }
+      } catch (error) {
+        console.error('Data fetch failed:', error)
+      }
+    }
+    
+    // Fetch data for new session or when session transitions to running
+    if (currentSessionId && !hasFetchedForSession.current.has(currentSessionId)) {
+      dispatch(fetchLiveStatus(currentSessionId))
+      fetchDataWithRetry(currentSessionId)
+      hasFetchedForSession.current.add(currentSessionId)
+    } else if (currentSessionId && currentState === 'running' && prevState !== 'running') {
+      fetchDataWithRetry(currentSessionId)
+    }
+    
+    previousState.current = currentState
+  }, [status?.state, sessionId, dispatch])
+  
+  // Use polling only when WebSocket is not connected
   useInterval(() => {
     if (!sessionId) return
     dispatch(fetchLiveStatus(sessionId))
@@ -160,6 +216,17 @@ export default function LivePage() {
           </Link>
           <span style={{ fontWeight: 850 }}>Live</span>
           <span className="muted">{sessionId}</span>
+          <span 
+            className="pill" 
+            style={{ 
+              backgroundColor: websocketConnected ? '#4CAF50' : websocketError ? '#f44336' : '#FF9800',
+              color: 'white',
+              fontSize: '0.8em',
+              marginLeft: '8px'
+            }}
+          >
+            {websocketConnected ? '🟢 WebSocket' : websocketError ? '🔴 WS Error' : '🟡 Connecting...'}
+          </span>
         </div>
       }
       subtitle={status?.state ? `Status: ${status.state}` : undefined}

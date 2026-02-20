@@ -11,6 +11,41 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# WebSocket client for streaming chart updates
+try:
+    import asyncio
+    import websockets
+    from websockets.exceptions import ConnectionClosed, ConnectionClosedError
+    WEBSOCKET_AVAILABLE = True
+    print("WebSocket streaming enabled")
+except ImportError:
+    WEBSOCKET_AVAILABLE = False
+    print("Warning: websockets library not available, WebSocket streaming disabled")
+
+# Check for MetaTrader5 availability
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    MT5_AVAILABLE = False
+    print("Warning: MetaTrader5 not available, live trading disabled")
+
+# Import WebSocket broadcast function
+try:
+    from web_app.backtests.consumers import broadcast_chart_update
+    WEBSOCKET_BROADCAST_AVAILABLE = True
+    print("WebSocket broadcast enabled")
+except ImportError:
+    # Fallback for different import paths
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from backtests.consumers import broadcast_chart_update
+        WEBSOCKET_BROADCAST_AVAILABLE = True
+        print("WebSocket broadcast enabled (fallback path)")
+    except ImportError:
+        WEBSOCKET_BROADCAST_AVAILABLE = False
+        print("Warning: WebSocket broadcast not available, live streaming disabled")
+
 # Import LiveDataManager at module level
 try:
     from web_app.backtests.runner.live_data_manager import LiveDataManager
@@ -426,7 +461,7 @@ def main() -> int:
     sys.path.insert(0, str(repo_root))
 
   try:
-    import MetaTrader5 as mt5
+    # MT5 is already imported at module level as mt5
 
     def _status_patch(patch: dict[str, Any]) -> None:
       try:
@@ -439,6 +474,11 @@ def main() -> int:
     _status_patch({'state': 'running', 'error': None, 'python_executable': sys.executable})
 
     # ---- MT5 init/login ----
+    if not MT5_AVAILABLE:
+      print("ERROR: MetaTrader5 not available - cannot run live trading")
+      _status_patch({'state': 'error', 'error': 'MetaTrader5 not available'})
+      return 1
+    
     mt5_path = os.environ.get('MT5_PATH') or None
     if mt5_path:
       initialized = mt5.initialize(path=mt5_path)
@@ -462,9 +502,10 @@ def main() -> int:
       raise RuntimeError(f'MT5 login failed: {mt5.last_error()}')
 
     symbols_raw = os.environ.get('MT5_SYMBOL') or ''
-    symbols = [s.strip() for s in symbols_raw.split(',') if s.strip()]
+    symbols = [s.strip().rstrip('.') for s in symbols_raw.split(',') if s.strip()]
     if not symbols:
       raise RuntimeError('Missing MT5_SYMBOL')
+    print(f"DEBUG: Processed symbols: {symbols}")
 
     timeframe_str = (os.environ.get('MT5_TIMEFRAME') or 'H1').upper()
     tf_map = {
@@ -524,15 +565,9 @@ def main() -> int:
       
       # Only use LiveDataManager if it's available
       if LiveDataManager is not None:
-        print(f"DEBUG: LiveDataManager available, initializing for symbols")
-      else:
-        print(f"DEBUG: LiveDataManager not available, skipping live data features")
-      
-      for sym in symbols:
-        # Initialize LiveDataManager for each symbol if available
-        if LiveDataManager is not None:
+        for sym in symbols:
+          # Initialize LiveDataManager for each symbol if available
           live_data_managers[sym] = LiveDataManager(sym, timeframe_str)
-          print(f"DEBUG: Initialized LiveDataManager for {sym} with UUID: {live_data_managers[sym].uuid}")
         
         rates = mt5.copy_rates_from_pos(sym, tf, 0, int(args.max_candles))
         candles = []
@@ -569,6 +604,38 @@ def main() -> int:
 
         # Convert to new chart data format for consistency with backtesting.
         # Include nested structure (zones, indicators) so frontend chartData.zones.support / chartData.indicators.ema work.
+        
+        # Create timestamp-keyed data format for frontend
+        timestamp_keyed_data = {}
+        for i, ts in enumerate(times_s):
+            if i < len(closes) and i < len(ema):
+                timestamp_keyed_data[str(ts)] = {
+                    'ema': ema[i]['value'] if i < len(ema) and ema[i] else None,
+                    'support': None,  # Will be populated from zones
+                    'resistance': None,  # Will be populated from zones
+                }
+        
+        # Add support/resistance values from zones
+        for seg in support_segments:
+            start_time = seg.get('startTime')
+            end_time = seg.get('endTime')
+            value = seg.get('value')
+            if start_time and end_time and value:
+                # Find all timestamps in this segment and set support value
+                for ts in times_s:
+                    if start_time <= ts <= end_time and str(ts) in timestamp_keyed_data:
+                        timestamp_keyed_data[str(ts)]['support'] = value
+        
+        for seg in resistance_segments:
+            start_time = seg.get('startTime')
+            end_time = seg.get('endTime')
+            value = seg.get('value')
+            if start_time and end_time and value:
+                # Find all timestamps in this segment and set resistance value
+                for ts in times_s:
+                    if start_time <= ts <= end_time and str(ts) in timestamp_keyed_data:
+                        timestamp_keyed_data[str(ts)]['resistance'] = value
+        
         chart_data = {
             'ema': {
                 'data_type': 'ema',
@@ -607,20 +674,10 @@ def main() -> int:
           'zones': zones,  # Keep for backward compatibility
           'chart_data': chart_data,  # snake_case (API returns as-is)
           'chartData': chart_data,   # camelCase for frontend sym.chartData
+          'timestamp_keyed_data': timestamp_keyed_data,  # For WebSocket broadcasting
           'markers': [],  # Keep for backward compatibility
           'orderBoxes': [],
         }
-        
-        print(f"DEBUG Final: {sym} - Chart data support points: {len(chart_data['support']['points'])}")
-        print(f"DEBUG Final: {sym} - Chart data resistance points: {len(chart_data['resistance']['points'])}")
-        print(f"DEBUG Final: {sym} - Legacy zones support: {len(zones['supportSegments'])}")
-        print(f"DEBUG Final: {sym} - Legacy zones resistance: {len(zones['resistanceSegments'])}")
-        
-        # Debug: Show sample zone data format
-        if zones['supportSegments']:
-            print(f"DEBUG Final: Sample support zone format: {zones['supportSegments'][0]}")
-        if zones['resistanceSegments']:
-            print(f"DEBUG Final: Sample resistance zone format: {zones['resistanceSegments'][0]}")
         
         # Update LiveDataManager with all the processed data (if available)
         if LiveDataManager is not None and sym in live_data_managers:
@@ -660,6 +717,29 @@ def main() -> int:
       }
       _write_json(snapshot_path, snapshot)
       _status_patch({'latest_seq': latest_seq, 'state': 'running'})
+
+      # Broadcast chart updates via WebSocket if available
+      if WEBSOCKET_BROADCAST_AVAILABLE:
+        try:
+          session_id = session_dir.name
+          for symbol, symbol_data in out_symbols.items():
+            # Format data to match frontend ChartUpdateMessage interface
+            chart_update_data = {
+              'symbol': symbol,
+              'chartOverlayData': {
+                'data': {
+                  symbol: symbol_data.get('timestamp_keyed_data', {})  # Use the stored timestamp-keyed data
+                },
+                'trades': []  # Will be populated with live trades
+              },
+              'chartData': symbol_data.get('chartData', {}),
+              'candles': symbol_data.get('candles', []),
+              'timestamp': datetime.now(tz=timezone.utc).timestamp()
+            }
+            broadcast_chart_update(session_id, chart_update_data)
+          print(f"DEBUG: Broadcasted chart updates for session {session_id}")
+        except Exception as e:
+          print(f"Warning: Failed to broadcast chart update: {e}")
 
       time.sleep(float(args.poll_seconds))
 
