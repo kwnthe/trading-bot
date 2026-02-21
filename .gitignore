@@ -134,3 +134,4 @@ dmypy.json
 
 data/backtests/data/*.csv
 data/backtests/results/*.csv
+fastapi-app/data/backtests/*/*.csv
