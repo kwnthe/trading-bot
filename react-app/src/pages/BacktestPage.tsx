@@ -40,7 +40,7 @@ function useInterval(callback: () => void, delayMs: number | null) {
   }, [delayMs])
 }
 
-export default function JobPage() {
+export default function BacktestPage() {
   const { jobId: jobIdParam } = useParams<{ jobId: string }>()
   const dispatch = useAppDispatch()
   const navigate = useNavigate()
