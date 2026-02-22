@@ -18,9 +18,9 @@ async function readJsonSafe(res: Response): Promise<any> {
 }
 
 export async function apiFetchJson(path: string, init?: RequestInit): Promise<any> {
-  // Check if we're accessing via network IP and use direct FastAPI connection
-  const isNetworkAccess = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-  const url = isNetworkAccess ? `http://127.0.0.1:8000${path}` : path
+  // Use the API target from environment variable or default to relative path
+  const apiTarget = import.meta.env.VITE_API_TARGET || ''
+  const url = apiTarget ? `${apiTarget}${path}` : path
   
   const res = await fetch(url, {
     headers: {
