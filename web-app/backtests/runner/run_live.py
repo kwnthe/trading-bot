@@ -11,6 +11,41 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# WebSocket client for streaming chart updates
+try:
+    import asyncio
+    import websockets
+    from websockets.exceptions import ConnectionClosed, ConnectionClosedError
+    WEBSOCKET_AVAILABLE = True
+    print("WebSocket streaming enabled")
+except ImportError:
+    WEBSOCKET_AVAILABLE = False
+    print("Warning: websockets library not available, WebSocket streaming disabled")
+
+# Check for MetaTrader5 availability
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    MT5_AVAILABLE = False
+    print("Warning: MetaTrader5 not available, live trading disabled")
+
+# Import WebSocket broadcast function
+try:
+    from web_app.backtests.consumers import broadcast_chart_update
+    WEBSOCKET_BROADCAST_AVAILABLE = True
+    print("WebSocket broadcast enabled")
+except ImportError:
+    # Fallback for different import paths
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from backtests.consumers import broadcast_chart_update
+        WEBSOCKET_BROADCAST_AVAILABLE = True
+        print("WebSocket broadcast enabled (fallback path)")
+    except ImportError:
+        WEBSOCKET_BROADCAST_AVAILABLE = False
+        print("Warning: WebSocket broadcast not available, live streaming disabled")
+
 # Import LiveDataManager at module level
 try:
     from web_app.backtests.runner.live_data_manager import LiveDataManager
@@ -355,130 +390,15 @@ def _get_zones_from_strategy(times_s: list[int], highs: list[float], lows: list[
             import traceback
             traceback.print_exc()
     
-    print(f"DEBUG Strategy: {symbol} - Falling back to enhanced zone calculation")
-    return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
+    print(f"DEBUG Strategy: {symbol} - No zones generated")
+    return {'resistanceSegments': [], 'supportSegments': []}
     
   except Exception as e:
     # If strategy execution fails, use fallback
-    print(f"Warning: BreakoutIndicator failed, using fallback: {e}")
+    print(f"Warning: BreakoutIndicator failed: {e}")
     import traceback
     traceback.print_exc()
-    return _compute_zones_fallback(times_s, highs, lows, closes, symbol, lookback)
-
-
-def _compute_zones_fallback(times_s: list[int], highs: list[float], lows: list[float], closes: list[float], symbol: str, lookback: int) -> dict[str, Any]:
-  """
-  Enhanced fallback zone calculation that mimics BreakoutIndicator behavior.
-  This creates realistic support and resistance zones based on price action.
-  """
-  if not times_s or not highs or not lows or not closes:
     return {'resistanceSegments': [], 'supportSegments': []}
-  
-  import numpy as np
-  
-  # Calculate ATR for dynamic zone spacing
-  atr_values = []
-  for i in range(1, len(closes)):
-    tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-    atr_values.append(tr)
-  
-  atr_period = min(14, len(atr_values))
-  current_atr = sum(atr_values[-atr_period:]) / atr_period if atr_values else (highs[0] - lows[0]) * 0.02
-  
-  print(f"DEBUG Fallback: {symbol} - Current ATR: {current_atr}")
-  
-  # Find significant swing highs and lows with their actual times
-  resistance_levels = []
-  support_levels = []
-  
-  # Use a swing detection algorithm
-  swing_period = max(5, lookback // 10)  # Dynamic swing period
-  
-  for i in range(swing_period, len(times_s) - swing_period):
-    # Check for swing high (resistance)
-    is_swing_high = True
-    current_high = highs[i]
-    for j in range(i - swing_period, i + swing_period + 1):
-      if j != i and highs[j] >= current_high:
-        is_swing_high = False
-        break
-    
-    if is_swing_high:
-      # Check if this resistance is significant (based on ATR)
-      recent_low = min(lows[max(0, i - swing_period):i + 1])
-      if current_high - recent_low > current_atr * 0.5:  # Significant move
-        resistance_levels.append((current_high, times_s[i]))  # Store level with its actual time
-    
-    # Check for swing low (support)
-    is_swing_low = True
-    current_low = lows[i]
-    for j in range(i - swing_period, i + swing_period + 1):
-      if j != i and lows[j] <= current_low:
-        is_swing_low = False
-        break
-    
-    if is_swing_low:
-      # Check if this support is significant
-      recent_high = max(highs[max(0, i - swing_period):i + 1])
-      if recent_high - current_low > current_atr * 0.5:  # Significant move
-        support_levels.append((current_low, times_s[i]))  # Store level with its actual time
-  
-  # Cluster nearby levels to avoid too many zones
-  def cluster_levels(levels, atr_multiplier=0.5):
-    if not levels:
-      return []
-    
-    clustered = []
-    levels.sort(key=lambda x: x[0])  # Sort by price level
-    
-    for level, time in levels:
-      if not clustered:
-        clustered.append((level, time))
-      else:
-        # Check if this level is far enough from the last clustered level
-        if abs(level - clustered[-1][0]) > current_atr * atr_multiplier:
-          clustered.append((level, time))
-    
-    return clustered
-  
-  resistance_levels = cluster_levels(resistance_levels)
-  support_levels = cluster_levels(support_levels)
-  
-  print(f"DEBUG Fallback: {symbol} - Found {len(resistance_levels)} resistance levels, {len(support_levels)} support levels")
-  
-  # Convert to segments with proper time limits
-  resistance_segments = []
-  support_segments = []
-  
-  # Zone expiration time (in seconds) - zones should expire after some time
-  zone_duration = lookback * 60 * 60  # lookback hours in seconds
-  
-  for level, detection_time in resistance_levels:
-    # Create segment that starts when the level was detected and lasts for zone_duration
-    resistance_segments.append({
-      'startTime': detection_time,
-      'endTime': min(detection_time + zone_duration, times_s[-1]),
-      'value': level + 0.00001  # Small padding
-    })
-  
-  for level, detection_time in support_levels:
-    # Create segment that starts when the level was detected and lasts for zone_duration
-    support_segments.append({
-      'startTime': detection_time,
-      'endTime': min(detection_time + zone_duration, times_s[-1]),
-      'value': level - 0.00001  # Small padding
-    })
-  
-  print(f"DEBUG Fallback: {symbol} - Generated {len(support_segments)} support, {len(resistance_segments)} resistance zones")
-  if support_segments:
-    print(f"DEBUG Fallback: Sample support: {support_segments[0]}")
-  if resistance_segments:
-    print(f"DEBUG Fallback: Sample resistance: {resistance_segments[0]}")
-  
-  return {
-    'resistanceSegments': resistance_segments,
-    'supportSegments': support_segments,
-  }
 
 
 def _segments_from_constant_levels(times_s: list[int], values: list[float]) -> list[dict[str, Any]]:
@@ -541,7 +461,7 @@ def main() -> int:
     sys.path.insert(0, str(repo_root))
 
   try:
-    import MetaTrader5 as mt5
+    # MT5 is already imported at module level as mt5
 
     def _status_patch(patch: dict[str, Any]) -> None:
       try:
@@ -554,6 +474,11 @@ def main() -> int:
     _status_patch({'state': 'running', 'error': None, 'python_executable': sys.executable})
 
     # ---- MT5 init/login ----
+    if not MT5_AVAILABLE:
+      print("ERROR: MetaTrader5 not available - cannot run live trading")
+      _status_patch({'state': 'error', 'error': 'MetaTrader5 not available'})
+      return 1
+    
     mt5_path = os.environ.get('MT5_PATH') or None
     if mt5_path:
       initialized = mt5.initialize(path=mt5_path)
@@ -577,9 +502,10 @@ def main() -> int:
       raise RuntimeError(f'MT5 login failed: {mt5.last_error()}')
 
     symbols_raw = os.environ.get('MT5_SYMBOL') or ''
-    symbols = [s.strip() for s in symbols_raw.split(',') if s.strip()]
+    symbols = [s.strip().rstrip('.') for s in symbols_raw.split(',') if s.strip()]
     if not symbols:
       raise RuntimeError('Missing MT5_SYMBOL')
+    print(f"DEBUG: Processed symbols: {symbols}")
 
     timeframe_str = (os.environ.get('MT5_TIMEFRAME') or 'H1').upper()
     tf_map = {
@@ -639,15 +565,9 @@ def main() -> int:
       
       # Only use LiveDataManager if it's available
       if LiveDataManager is not None:
-        print(f"DEBUG: LiveDataManager available, initializing for symbols")
-      else:
-        print(f"DEBUG: LiveDataManager not available, skipping live data features")
-      
-      for sym in symbols:
-        # Initialize LiveDataManager for each symbol if available
-        if LiveDataManager is not None:
+        for sym in symbols:
+          # Initialize LiveDataManager for each symbol if available
           live_data_managers[sym] = LiveDataManager(sym, timeframe_str)
-          print(f"DEBUG: Initialized LiveDataManager for {sym} with UUID: {live_data_managers[sym].uuid}")
         
         rates = mt5.copy_rates_from_pos(sym, tf, 0, int(args.max_candles))
         candles = []
@@ -684,6 +604,38 @@ def main() -> int:
 
         # Convert to new chart data format for consistency with backtesting.
         # Include nested structure (zones, indicators) so frontend chartData.zones.support / chartData.indicators.ema work.
+        
+        # Create timestamp-keyed data format for frontend
+        timestamp_keyed_data = {}
+        for i, ts in enumerate(times_s):
+            if i < len(closes) and i < len(ema):
+                timestamp_keyed_data[str(ts)] = {
+                    'ema': ema[i]['value'] if i < len(ema) and ema[i] else None,
+                    'support': None,  # Will be populated from zones
+                    'resistance': None,  # Will be populated from zones
+                }
+        
+        # Add support/resistance values from zones
+        for seg in support_segments:
+            start_time = seg.get('startTime')
+            end_time = seg.get('endTime')
+            value = seg.get('value')
+            if start_time and end_time and value:
+                # Find all timestamps in this segment and set support value
+                for ts in times_s:
+                    if start_time <= ts <= end_time and str(ts) in timestamp_keyed_data:
+                        timestamp_keyed_data[str(ts)]['support'] = value
+        
+        for seg in resistance_segments:
+            start_time = seg.get('startTime')
+            end_time = seg.get('endTime')
+            value = seg.get('value')
+            if start_time and end_time and value:
+                # Find all timestamps in this segment and set resistance value
+                for ts in times_s:
+                    if start_time <= ts <= end_time and str(ts) in timestamp_keyed_data:
+                        timestamp_keyed_data[str(ts)]['resistance'] = value
+        
         chart_data = {
             'ema': {
                 'data_type': 'ema',
@@ -722,20 +674,10 @@ def main() -> int:
           'zones': zones,  # Keep for backward compatibility
           'chart_data': chart_data,  # snake_case (API returns as-is)
           'chartData': chart_data,   # camelCase for frontend sym.chartData
+          'timestamp_keyed_data': timestamp_keyed_data,  # For WebSocket broadcasting
           'markers': [],  # Keep for backward compatibility
           'orderBoxes': [],
         }
-        
-        print(f"DEBUG Final: {sym} - Chart data support points: {len(chart_data['support']['points'])}")
-        print(f"DEBUG Final: {sym} - Chart data resistance points: {len(chart_data['resistance']['points'])}")
-        print(f"DEBUG Final: {sym} - Legacy zones support: {len(zones['supportSegments'])}")
-        print(f"DEBUG Final: {sym} - Legacy zones resistance: {len(zones['resistanceSegments'])}")
-        
-        # Debug: Show sample zone data format
-        if zones['supportSegments']:
-            print(f"DEBUG Final: Sample support zone format: {zones['supportSegments'][0]}")
-        if zones['resistanceSegments']:
-            print(f"DEBUG Final: Sample resistance zone format: {zones['resistanceSegments'][0]}")
         
         # Update LiveDataManager with all the processed data (if available)
         if LiveDataManager is not None and sym in live_data_managers:
@@ -775,6 +717,29 @@ def main() -> int:
       }
       _write_json(snapshot_path, snapshot)
       _status_patch({'latest_seq': latest_seq, 'state': 'running'})
+
+      # Broadcast chart updates via WebSocket if available
+      if WEBSOCKET_BROADCAST_AVAILABLE:
+        try:
+          session_id = session_dir.name
+          for symbol, symbol_data in out_symbols.items():
+            # Format data to match frontend ChartUpdateMessage interface
+            chart_update_data = {
+              'symbol': symbol,
+              'chartOverlayData': {
+                'data': {
+                  symbol: symbol_data.get('timestamp_keyed_data', {})  # Use the stored timestamp-keyed data
+                },
+                'trades': []  # Will be populated with live trades
+              },
+              'chartData': symbol_data.get('chartData', {}),
+              'candles': symbol_data.get('candles', []),
+              'timestamp': datetime.now(tz=timezone.utc).timestamp()
+            }
+            broadcast_chart_update(session_id, chart_update_data)
+          print(f"DEBUG: Broadcasted chart updates for session {session_id}")
+        except Exception as e:
+          print(f"Warning: Failed to broadcast chart update: {e}")
 
       time.sleep(float(args.poll_seconds))
 

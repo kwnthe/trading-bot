@@ -74,7 +74,7 @@ def load_config() -> Configuration:
         config.mode = "live" if "-m" in sys.argv else "backtest"
         return config
     except ValidationError as e:
-        print("❌ Configuration Error: Missing or invalid required environment variables!")
+        print("Configuration Error: Missing or invalid required environment variables!")
         for error in e.errors():
             field = error['loc'][0] if error['loc'] else 'unknown'
             message = error['msg']
@@ -82,7 +82,7 @@ def load_config() -> Configuration:
         print("\nPlease check your .env file and ensure all required variables are set.")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Unexpected error loading configuration: {e}")
+        print(f"Unexpected error loading configuration: {e}")
         sys.exit(1)
 
 

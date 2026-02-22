@@ -11,7 +11,7 @@ from collections import defaultdict
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
-from utils.config import Config, load_config
+from src.utils.config import Config, load_config
 from data.csv_data_feed import CSVDataFeed
 from strategies.BreakRetestStrategy import BreakRetestStrategy
 from src.utils.execution_simulator import RealisticExecutionBroker

@@ -1,0 +1,39 @@
+# Core FastAPI dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0
+
+# Pydantic for data validation
+pydantic>=2.8.0
+pydantic-settings>=2.1.0
+
+# HTTP client (if needed for external requests)
+httpx==0.25.2
+
+# Development and testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+
+# Additional utilities
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Environment file support
+python-dotenv==1.0.0
+
+# Date/time utilities
+python-dateutil==2.8.2
+
+# JSON handling (already in stdlib, but explicit version for consistency)
+# json is part of standard library
+
+# Path utilities (already in stdlib)
+# pathlib is part of standard library
+
+# Async utilities
+# asyncio is part of standard library in Python 3.7+
+
+# Type hints (better support for older Python versions)
+typing-extensions==4.8.0

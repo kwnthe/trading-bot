@@ -15,13 +15,7 @@ from collections import deque
 import sys
 import os
 
-# Import config - add src directory to path if needed
-# File is in src/data/, config is in src/utils/
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-_src_dir = os.path.dirname(_current_dir)  # Go up from src/data/ to src/
-if _src_dir not in sys.path:
-    sys.path.insert(0, _src_dir)
-from utils.config import Config
+from src.utils.config import Config
 
 
 class MT5DataFeed:

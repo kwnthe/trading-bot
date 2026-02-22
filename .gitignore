@@ -5,6 +5,7 @@ __pycache__/
 .DS_Store
 zones.html
 zones_local.html
+wip.html
 
 # C extensions
 *.so
@@ -133,3 +134,4 @@ dmypy.json
 
 data/backtests/data/*.csv
 data/backtests/results/*.csv
+fastapi-app/data/backtests/*/*.csv
