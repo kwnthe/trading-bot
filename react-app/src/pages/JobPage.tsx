@@ -146,17 +146,20 @@ export default function JobPage() {
   }, [status?.params])
 
   const flatParams = useMemo(() => {
-    const out: Array<[string, any]> = []
+    const out: Array<[string, any, string]> = []
     for (const sec of paramsEntries || []) {
-      for (const [k, v] of sec.entries) out.push([k, v])
+      for (const [k, v] of sec.entries) out.push([k, v, sec.title])
     }
     return out
   }, [paramsEntries])
 
   const paramCols = useMemo(() => {
     const cols = 3
-    const out: Array<Array<[string, any]>> = Array.from({ length: cols }, () => [])
-    for (let i = 0; i < flatParams.length; i++) out[i % cols].push(flatParams[i])
+    const out: Array<Array<[string, any, string]>> = Array.from({ length: cols }, () => [])
+    for (let i = 0; i < flatParams.length; i++) {
+      const [k, v, sectionTitle] = flatParams[i]
+      out[i % cols].push([k, v, `${sectionTitle}-${k}`])
+    }
     return out
   }, [flatParams])
 
@@ -318,8 +321,8 @@ export default function JobPage() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1px 1fr 1px 1fr', gap: 14, alignItems: 'stretch' }}>
             {paramCols.map((col, idx) => (
               <div key={idx} style={{ display: 'grid', gap: 10 }}>
-                {col.map(([k, v]) => (
-                  <div key={k} className="pill">
+                {col.map(([k, v, uniqueKey]) => (
+                  <div key={uniqueKey} className="pill">
                     <b>{labelByName.get(k) || k}</b>
                     <span className="muted">{fmtValue(v)}</span>
                   </div>
