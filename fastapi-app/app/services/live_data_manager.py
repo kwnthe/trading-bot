@@ -36,13 +36,43 @@ class LiveDataManager:
             },
             "ema": [],
             "chart_data": {
-                "markers": {
+                "ema": {
+                    "data_type": "ema",
+                    "metadata": {"period": 20},
                     "points": []
+                },
+                "support": {
+                    "data_type": "support",
+                    "metadata": {},
+                    "points": []
+                },
+                "resistance": {
+                    "data_type": "resistance",
+                    "metadata": {},
+                    "points": []
+                },
+                "markers": {
+                    "data_type": "marker",
+                    "metadata": {},
+                    "points": []
+                },
+                "zones": {
+                    "support": [],
+                    "resistance": []
+                },
+                "indicators": {
+                    "ema": []
                 }
             },
+            "chartData": {},  # Will be populated as copy of chart_data
+            "markers": [],
+            "orderBoxes": [],
             "extensions": {
                 "breakouts": [],
                 "events": [],
+                "alerts": [],
+                "patterns": [],
+                "volume_analysis": {},
                 "custom_indicators": {}
             }
         }
@@ -64,6 +94,9 @@ class LiveDataManager:
         
         # Update metadata
         self.data["metadata"]["last_updated"] = int(datetime.now(timezone.utc).timestamp())
+        
+        # Ensure chartData is synchronized with chart_data
+        self.data["chartData"] = self.data["chart_data"].copy()
         
         # Create backup before saving
         backup_file = self.data_file.with_suffix('.json.bak')
@@ -108,6 +141,12 @@ class LiveDataManager:
         if len(self.data["candles"]) > 1000:
             self.data["candles"] = self.data["candles"][-1000:]
     
+    def add_candles(self, candles: List[Dict[str, Any]]) -> None:
+        """Add candle data with automatic rolling window"""
+        # Keep last 1000 candles
+        self.data["candles"] = candles[-1000:] if len(candles) > 1000 else candles
+        self.data["metadata"]["last_updated"] = int(datetime.now(timezone.utc).timestamp())
+    
     def add_zone(self, zone_type: str, start_time: int, end_time: int, 
                  price: float, strength: float = 1.0) -> None:
         """Add a support or resistance zone"""
@@ -120,8 +159,25 @@ class LiveDataManager:
         
         if zone_type.lower() == "support":
             self.data["zones"]["supportSegments"].append(zone)
+            # Update chart_data structure
+            self.data["chart_data"]["support"]["points"].append(zone)
+            self.data["chart_data"]["zones"]["support"].append(zone)
         elif zone_type.lower() == "resistance":
             self.data["zones"]["resistanceSegments"].append(zone)
+            # Update chart_data structure
+            self.data["chart_data"]["resistance"]["points"].append(zone)
+            self.data["chart_data"]["zones"]["resistance"].append(zone)
+        
+        # Keep only last 50 zones
+        if len(self.data["zones"]["supportSegments"]) > 50:
+            self.data["zones"]["supportSegments"] = self.data["zones"]["supportSegments"][-50:]
+            self.data["chart_data"]["support"]["points"] = self.data["chart_data"]["support"]["points"][-50:]
+            self.data["chart_data"]["zones"]["support"] = self.data["chart_data"]["zones"]["support"][-50:]
+        
+        if len(self.data["zones"]["resistanceSegments"]) > 50:
+            self.data["zones"]["resistanceSegments"] = self.data["zones"]["resistanceSegments"][-50:]
+            self.data["chart_data"]["resistance"]["points"] = self.data["chart_data"]["resistance"]["points"][-50:]
+            self.data["chart_data"]["zones"]["resistance"] = self.data["chart_data"]["zones"]["resistance"][-50:]
     
     def add_ema_point(self, time: int, value: float) -> None:
         """Add an EMA data point"""
@@ -132,9 +188,23 @@ class LiveDataManager:
         
         self.data["ema"].append(ema_point)
         
+        # Update chart_data structure
+        self.data["chart_data"]["ema"]["points"].append(ema_point)
+        self.data["chart_data"]["indicators"]["ema"].append(ema_point)
+        
         # Keep only last 500 EMA points
         if len(self.data["ema"]) > 500:
             self.data["ema"] = self.data["ema"][-500:]
+            self.data["chart_data"]["ema"]["points"] = self.data["chart_data"]["ema"]["points"][-500:]
+            self.data["chart_data"]["indicators"]["ema"] = self.data["chart_data"]["indicators"]["ema"][-500:]
+    
+    def add_ema_points(self, ema_points: List[Dict[str, Any]], period: int = 20) -> None:
+        """Add EMA points with period metadata"""
+        self.data["ema"] = ema_points[-500:] if len(ema_points) > 500 else ema_points
+        self.data["chart_data"]["ema"]["metadata"]["period"] = period
+        self.data["chart_data"]["ema"]["points"] = self.data["ema"]
+        self.data["chart_data"]["indicators"]["ema"] = self.data["ema"]
+        self.data["metadata"]["last_updated"] = int(datetime.now(timezone.utc).timestamp())
     
     def add_marker(self, time: Union[int, float], value: Union[int, float], 
                    marker_type: str, metadata: Optional[Dict[str, Any]] = None) -> None:
@@ -226,6 +296,36 @@ class LiveDataManager:
             self.save()
         
         return removed_count
+    
+    def update_from_live_runner_output(self, live_output: Dict[str, Any]) -> None:
+        """Update data from existing live runner output format"""
+        # Copy existing structure
+        if "candles" in live_output:
+            self.add_candles(live_output["candles"])
+        
+        if "ema" in live_output:
+            self.add_ema_points(live_output["ema"])
+        
+        if "zones" in live_output:
+            if "supportSegments" in live_output["zones"]:
+                for zone in live_output["zones"]["supportSegments"]:
+                    self.add_zone("support", zone["start"], zone["end"], zone["price"], zone.get("strength", 1.0))
+            if "resistanceSegments" in live_output["zones"]:
+                for zone in live_output["zones"]["resistanceSegments"]:
+                    self.add_zone("resistance", zone["start"], zone["end"], zone["price"], zone.get("strength", 1.0))
+        
+        if "chart_data" in live_output:
+            self.data["chart_data"].update(live_output["chart_data"])
+        
+        # Ensure chartData is synchronized with chart_data
+        self.data["chartData"] = self.data["chart_data"].copy()
+        
+        self.data["metadata"]["last_updated"] = int(datetime.now(timezone.utc).timestamp())
+    
+    def add_extension_data(self, extension_type: str, data: Any) -> None:
+        """Add any extension data - completely flexible"""
+        self.data["extensions"][extension_type] = data
+        self.data["metadata"]["last_updated"] = int(datetime.now(timezone.utc).timestamp())
 
 
 def get_all_live_sessions() -> List[Dict[str, Any]]:

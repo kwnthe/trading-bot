@@ -16,6 +16,7 @@ class LivePaths:
         self.params_json = session_dir / "params.json"
         self.status_json = session_dir / "status.json"
         self.snapshot_json = session_dir / "snapshot.json"
+        self.chart_overlays_json = session_dir / "chart_overlays.json"
         self.stdout_log = session_dir / "stdout.log"
         self.stderr_log = session_dir / "stderr.log"
 
@@ -28,7 +29,7 @@ def create_live_session(base_dir: Path, params: Dict[str, Any]) -> Tuple[str, Li
     
     paths = LivePaths(session_dir)
     
-    # Save parameters
+    # Save parameters to the json file
     with open(paths.params_json, 'w') as f:
         json.dump(params, f, indent=2, default=str)
     
@@ -39,6 +40,7 @@ def create_live_session(base_dir: Path, params: Dict[str, Any]) -> Tuple[str, Li
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     
+    # Update status.json file
     with open(paths.status_json, 'w') as f:
         json.dump(initial_status, f, indent=2, default=str)
     
@@ -55,6 +57,7 @@ def read_live_status(paths: LivePaths) -> Dict[str, Any]:
             return {"state": "unknown", "error": "Status file not found"}
     except (json.JSONDecodeError, FileNotFoundError) as e:
         return {"state": "unknown", "error": f"Failed to read status.json: {str(e)}"}
+
 
 
 def write_live_status(paths: LivePaths, status_update: Dict[str, Any]) -> None:
@@ -125,10 +128,11 @@ def stop_session_pid(pid: Optional[int]) -> bool:
 def start_live_runner_process(base_dir: Path, session_dir: Path, 
                             stdout_log: Path, stderr_log: Path) -> int:
     """Start the live trading runner process"""
-    # Get the runner script path - check both FastAPI and original locations
+    # Get the runner script path - use the FastAPI version
     possible_paths = [
-        base_dir.parent / "web-app" / "backtests" / "runner" / "run_live.py",
-        base_dir / "web-app" / "backtests" / "runner" / "run_live.py",
+        base_dir / "run_live.py",  # FastAPI version (updated with ChartOverlayManager)
+        base_dir.parent / "fastapi-app" / "run_live.py",  # Alternative location
+        base_dir.parent / "web-app" / "backtests" / "runner" / "run_live.py",  # Fallback to old version
     ]
     
     runner_script = None
@@ -140,18 +144,32 @@ def start_live_runner_process(base_dir: Path, session_dir: Path,
     if runner_script is None:
         raise FileNotFoundError(f"Live runner script not found. Checked: {possible_paths}")
     
+    print(f"DEBUG: Using runner script: {runner_script}")
+    
     # Prepare environment
     env = os.environ.copy()
     # Add both the FastAPI app directory and the parent directory to Python path
     env['PYTHONPATH'] = f"{str(base_dir.parent)};{str(base_dir)}"
     env['SESSION_DIR'] = str(session_dir)
     
+    # Use virtual environment Python if available
+    if os.name == 'nt':  # Windows
+        venv_python = base_dir / "venv" / "Scripts" / "python.exe"
+    else:  # Linux/Unix
+        venv_python = base_dir / "venv" / "bin" / "python"
+    
+    if venv_python.exists():
+        python_exe = str(venv_python)
+        print(f"DEBUG: Using virtual environment Python: {python_exe}")
+    else:
+        python_exe = sys.executable
+        print(f"DEBUG: Using system Python: {python_exe}")
     # Start the process
     with open(stdout_log, 'w') as stdout_file, \
          open(stderr_log, 'w') as stderr_file:
         
         process = subprocess.Popen(
-            [sys.executable, str(runner_script), "--session-dir", str(session_dir)],
+            [python_exe, str(runner_script), "--session-dir", str(session_dir)],
             stdout=stdout_file,
             stderr=stderr_file,
             env=env,
