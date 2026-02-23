@@ -31,8 +31,8 @@ export type LiveStatusResponse = {
   error?: string | null
   latest_seq?: number
   params?: any
-  stdout_tail?: string
-  stderr_tail?: string
+  stdout?: string
+  stderr?: string
   has_snapshot?: boolean
   snapshot_url?: string | null
 }
@@ -238,7 +238,7 @@ const liveSlice = createSlice({
       .addCase(connectWebSocket.pending, (state) => {
         state.websocketError = null
       })
-      .addCase(connectWebSocket.fulfilled, (state, action) => {
+      .addCase(connectWebSocket.fulfilled, (_, action) => {
         // Connection status is handled by the connection status handler
         console.log('WebSocket connection initiated for session:', action.payload)
       })

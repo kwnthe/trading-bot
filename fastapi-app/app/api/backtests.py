@@ -14,11 +14,12 @@ from app.models.schemas import (
 from app.services.params import get_param_definitions, get_initial_form_data, get_strategies
 from app.services.job_store import (
     create_job, start_runner_process, get_job_paths, read_status, 
-    tail_text_file, is_pid_running
+    is_pid_running
 )
+from app.utils.file_utils import read_text_file
 from app.services.live_store import (
     create_live_session, start_live_runner_process, get_live_paths,
-    read_live_status, tail_live_text_file, stop_session_pid,
+    read_live_status, stop_session_pid,
     get_active_session_id, set_active_session_id
 )
 from app.services.presets_store import load_presets, upsert_preset, delete_preset, normalize_preset_name
@@ -205,8 +206,8 @@ async def api_live_status(session_id: str) -> LiveSessionStatus:
         error=status_data.get("error"),
         latest_seq=status_data.get("latest_seq"),
         params=params_payload,
-        stdout_tail=tail_live_text_file(paths.stdout_log),
-        stderr_tail=tail_live_text_file(paths.stderr_log),
+        stdout=read_text_file(paths.stdout_log),
+        stderr=read_text_file(paths.stderr_log),
         has_snapshot=paths.snapshot_json.exists(),
         snapshot_url=f"/api/live/{session_id}/snapshot/" if paths.snapshot_json.exists() else None
     )
@@ -357,8 +358,8 @@ async def job_status(job_id: str) -> JobStatus:
         returncode=status_data.get("returncode"),
         error=status_data.get("error"),
         params=params_payload,
-        stdout_tail=tail_text_file(paths.stdout_log),
-        stderr_tail=tail_text_file(paths.stderr_log),
+        stdout=read_text_file(paths.stdout_log),
+        stderr=read_text_file(paths.stderr_log),
         has_result=paths.result_json.exists(),
         result_url=f"/api/jobs/{job_id}/result/" if paths.result_json.exists() else None
     )

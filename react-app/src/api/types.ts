@@ -24,8 +24,8 @@ export interface JobStatusResponse {
     env_overrides?: Record<string, any>
     meta?: Record<string, any>
   } | null
-  stdout_tail?: string
-  stderr_tail?: string
+  stdout?: string
+  stderr?: string
   has_result?: boolean
   result_url?: string | null
 }

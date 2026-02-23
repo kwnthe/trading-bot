@@ -184,13 +184,13 @@ export default function LivePage() {
     const el = stdoutRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [status?.stdout_tail])
+  }, [status?.stdout])
 
   useEffect(() => {
     const el = stderrRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [status?.stderr_tail])
+  }, [status?.stderr])
 
   // Use keyboard shortcuts hook
   useKeyboardShortcuts({
@@ -283,7 +283,7 @@ export default function LivePage() {
             <button
               type="button"
               className="iconButton"
-              onClick={() => copyToClipboard(status?.stdout_tail || '')}
+              onClick={() => copyToClipboard(status?.stdout || '')}
               title="Copy stdout"
               aria-label="Copy stdout"
             >
@@ -291,7 +291,7 @@ export default function LivePage() {
             </button>
           }
         >
-          <div ref={stdoutRef} className="log">{status?.stdout_tail || ''}</div>
+          <div ref={stdoutRef} className="log">{status?.stdout || ''}</div>
         </Card>
         <Card
           title={<span style={{ fontWeight: 800 }}>stderr</span>}
@@ -299,7 +299,7 @@ export default function LivePage() {
             <button
               type="button"
               className="iconButton"
-              onClick={() => copyToClipboard(status?.stderr_tail || '')}
+              onClick={() => copyToClipboard(status?.stderr || '')}
               title="Copy stderr"
               aria-label="Copy stderr"
             >
@@ -307,7 +307,7 @@ export default function LivePage() {
             </button>
           }
         >
-          <div ref={stderrRef} className="log">{status?.stderr_tail || ''}</div>
+          <div ref={stderrRef} className="log">{status?.stderr || ''}</div>
         </Card>
       </div>
 

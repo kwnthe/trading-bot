@@ -118,13 +118,13 @@ export default function BacktestPage() {
     const el = stdoutRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [status?.stdout_tail])
+  }, [status?.stdout])
 
   useEffect(() => {
     const el = stderrRef.current
     if (!el) return
     el.scrollTop = el.scrollHeight
-  }, [status?.stderr_tail])
+  }, [status?.stderr])
 
   const statsEntries = Object.entries(result?.stats || {})
 
@@ -280,7 +280,7 @@ export default function BacktestPage() {
           title={<span style={{ fontWeight: 800 }}>stdout</span>}
           right={
             <button
-              onClick={() => navigator.clipboard.writeText(status?.stdout_tail || '')}
+              onClick={() => navigator.clipboard.writeText(status?.stdout || '')}
               style={btnStyle}
               title="Copy stdout"
               type="button"
@@ -292,13 +292,13 @@ export default function BacktestPage() {
             </button>
           }
         >
-          <div ref={stdoutRef} className="log">{status?.stdout_tail || ''}</div>
+          <div ref={stdoutRef} className="log">{status?.stdout || ''}</div>
         </Card>
         <Card 
           title={<span style={{ fontWeight: 800 }}>stderr</span>}
           right={
             <button
-              onClick={() => navigator.clipboard.writeText(status?.stderr_tail || '')}
+              onClick={() => navigator.clipboard.writeText(status?.stderr || '')}
               style={btnStyle}
               title="Copy stderr"
               type="button"
@@ -310,7 +310,7 @@ export default function BacktestPage() {
             </button>
           }
         >
-          <div ref={stderrRef} className="log">{status?.stderr_tail || ''}</div>
+          <div ref={stderrRef} className="log">{status?.stderr || ''}</div>
         </Card>
       </div>
 

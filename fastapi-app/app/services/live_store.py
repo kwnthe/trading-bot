@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Tuple
 import uuid
 
 from app.core.config import settings
+from app.utils.file_utils import read_text_file
 
 
 class LivePaths:
@@ -93,19 +94,6 @@ def set_active_session_id(base_dir: Path, session_id: Optional[str]) -> None:
             f.write(session_id)
     elif active_file.exists():
         active_file.unlink()
-
-
-def tail_live_text_file(file_path: Path, num_lines: int = 20) -> str:
-    """Get last N lines from a live session log file"""
-    try:
-        if not file_path.exists():
-            return ""
-        
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
-            return ''.join(lines[-num_lines:])
-    except Exception:
-        return ""
 
 
 def stop_session_pid(pid: Optional[int]) -> bool:

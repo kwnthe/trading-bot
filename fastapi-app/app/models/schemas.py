@@ -123,8 +123,8 @@ class JobStatus(BaseModel):
     returncode: Optional[int]
     error: Optional[str]
     params: Optional[Dict[str, Any]]
-    stdout_tail: Optional[str]
-    stderr_tail: Optional[str]
+    stdout: Optional[str]
+    stderr: Optional[str]
     has_result: bool
     result_url: Optional[str]
 
@@ -148,8 +148,8 @@ class LiveSessionStatus(BaseModel):
     error: Optional[str]
     latest_seq: Optional[int]
     params: Optional[Dict[str, Any]]
-    stdout_tail: Optional[str]
-    stderr_tail: Optional[str]
+    stdout: Optional[str]
+    stderr: Optional[str]
     has_snapshot: bool
     snapshot_url: Optional[str]
 

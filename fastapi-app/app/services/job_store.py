@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Tuple
 import uuid
 
 from app.core.config import settings
+from app.utils.file_utils import read_text_file
 
 
 class JobPaths:
@@ -79,19 +80,6 @@ def is_pid_running(pid: int) -> bool:
             return True
     except (OSError, subprocess.SubprocessError):
         return False
-
-
-def tail_text_file(file_path: Path, num_lines: int = 20) -> str:
-    """Get last N lines from a text file"""
-    try:
-        if not file_path.exists():
-            return ""
-        
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
-            return ''.join(lines[-num_lines:])
-    except Exception:
-        return ""
 
 
 def start_runner_process(base_dir: Path, paths: JobPaths) -> None:

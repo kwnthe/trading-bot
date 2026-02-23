@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 from app.services.params import get_param_definitions, get_initial_form_data, get_strategies
-from app.services.job_store import create_job, read_status, write_status, is_pid_running, tail_text_file
+from app.services.job_store import create_job, read_status, write_status, is_pid_running
 from app.services.live_store import create_live_session, read_live_status, write_live_status, get_active_session_id, set_active_session_id
 from app.services.presets_store import upsert_preset, load_presets, delete_preset, normalize_preset_name
 from app.services.live_data_manager import LiveDataManager, get_all_live_sessions, get_live_data_manager
@@ -130,31 +130,6 @@ class TestJobStoreService:
         # Test with non-existent PID
         assert is_pid_running(99999) is False
     
-    def test_tail_text_file(self, sample_job):
-        """Test tailing text file"""
-        paths = sample_job["paths"]
-        
-        # Create test log file
-        test_lines = [f"Line {i}\n" for i in range(1, 26)]
-        with open(paths.stdout_log, 'w') as f:
-            f.writelines(test_lines)
-        
-        # Test tail
-        tail_content = tail_text_file(paths.stdout_log, num_lines=10)
-        lines = tail_content.split('\n')
-        
-        # Should get last 10 lines (plus empty line at end)
-        assert len([line for line in lines if line.strip()]) == 10
-        assert "Line 25" in tail_content
-        assert "Line 16" in tail_content
-        assert "Line 15" not in tail_content
-        
-        # Test with non-existent file
-        non_existent_file = Path("/non/existent.log")
-        tail_content = tail_text_file(non_existent_file)
-        assert tail_content == ""
-
-
 class TestLiveStoreService:
     """Test live store service functions"""
     
@@ -239,26 +214,6 @@ class TestLiveStoreService:
         active = get_active_session_id(test_settings.BASE_DIR)
         assert active is None
     
-    def test_tail_live_text_file(self, sample_live_session):
-        """Test tailing live session log file"""
-        paths = sample_live_session["paths"]
-        
-        # Create test log file
-        test_lines = [f"Live Line {i}\n" for i in range(1, 16)]
-        with open(paths.stdout_log, 'w') as f:
-            f.writelines(test_lines)
-        
-        # Test tail
-        tail_content = tail_text_file(paths.stdout_log, num_lines=5)
-        lines = tail_content.split('\n')
-        
-        # Should get last 5 lines (plus empty line at end)
-        assert len([line for line in lines if line.strip()]) == 5
-        assert "Live Line 15" in tail_content
-        assert "Live Line 11" in tail_content
-        assert "Live Line 10" not in tail_content
-
-
 class TestPresetsStoreService:
     """Test presets store service functions"""
     
