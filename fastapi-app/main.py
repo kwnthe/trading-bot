@@ -35,6 +35,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add WebSocket CORS middleware manually
+@app.middleware("http")
+async def add_websocket_cors(request, call_next):
+    if request.url.path.startswith("/ws/"):
+        origin = request.headers.get("origin")
+        # Allow WebSocket connections from any origin in development
+        if origin:
+            # This is a WebSocket preflight request
+            if request.method == "GET":
+                response = await call_next(request)
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Upgrade, Connection, Sec-WebSocket-Key, Sec-WebSocket-Version, Sec-WebSocket-Protocol"
+                return response
+    return await call_next(request)
+
 # Include API routes
 app.include_router(api_router, prefix="/api")
 app.include_router(websocket_router)

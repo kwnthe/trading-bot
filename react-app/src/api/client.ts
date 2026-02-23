@@ -19,7 +19,7 @@ async function readJsonSafe(res: Response): Promise<any> {
 
 export async function apiFetchJson(path: string, init?: RequestInit): Promise<any> {
   // Use the API target from environment variable or default to relative path
-  const apiTarget = import.meta.env.VITE_API_TARGET || ''
+  const apiTarget = (import.meta.env.VITE_API_TARGET || '').trim()
   const url = apiTarget ? `${apiTarget}${path}` : path
   
   const res = await fetch(url, {

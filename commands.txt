@@ -8,7 +8,14 @@ set VITE_API_TARGET=http://192.168.2.22:8085 && npm run dev -- --host 0.0.0.0 --
 
 
 # Navigate to web-app
-cd web-app
 
-# Start WebSocket server
-daphne -b 0.0.0.0 -p 8086 trading_dashboard.asgi:application
+cd web-app
+python -m daphne -b 0.0.0.0 -p 8209 trading_dashboard.asgi:application
+set VITE_API_TARGET=http://192.168.2.22:8209 && npm run dev -- --host 0.0.0.0 --port 5173
+
+
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+
+python run_backtest.py --symbols XAGUSD --timeframe H1 --start-date 2025-01-01 --end-date 2025-02-01 --max-candles 10000
+python run_live.py --symbol XAGUSD --timeframe H1 --login 8024305 --password Mmw2323! --server ExclusiveMarkets-Demo --candles 10000

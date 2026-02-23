@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
 from typing import Dict, Any
 
@@ -40,6 +41,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     - Connection management
     """
     print(f"DEBUG: WebSocket connection attempt for session {session_id}")
+    print(f"DEBUG: WebSocket headers: {dict(websocket.headers)}")
+    
+    # Check Origin header for CORS
+    origin = websocket.headers.get("origin", "")
+    print(f"DEBUG: WebSocket Origin: {origin}")
+    
+    # Accept the connection first (this handles the WebSocket handshake)
+    await websocket.accept()
     
     # Validate session exists (basic check)
     if not await validate_session(session_id):
@@ -48,6 +57,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         return
     
     print(f"DEBUG: Session validated, accepting WebSocket connection for {session_id}")
+    
+    # Send connection confirmation
+    await websocket.send_json({
+        'type': 'connection_established',
+        'session_id': session_id,
+        'timestamp': datetime.now().isoformat(),
+        'message': 'Connected to live chart stream'
+    })
     
     # Connect the WebSocket
     await manager.connect(websocket, session_id)

@@ -12,7 +12,6 @@ import {
   setActiveSessionId, 
   stopLive,
   connectWebSocket,
-  disconnectWebSocket
 } from '../store/slices/liveSlice'
 import { fetchParamSchema } from '../store/slices/paramSchemaSlice'
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts'

@@ -43,7 +43,23 @@ def load_presets(base_dir: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
         presets_data = json.loads(data)
         if not isinstance(presets_data, dict):
             return {}
-        return presets_data.get("presets", {})
+        
+        raw_presets = presets_data.get("presets", {})
+        
+        # Create case-insensitive lookup by normalizing all keys
+        normalized_presets = {}
+        for name, preset_data in raw_presets.items():
+            try:
+                normalized_name = normalize_preset_name(name)
+                normalized_presets[normalized_name] = preset_data
+                # Also keep the original name for backward compatibility
+                if name != normalized_name:
+                    normalized_presets[name] = preset_data
+            except ValueError:
+                # Skip invalid preset names
+                continue
+        
+        return normalized_presets
     except Exception:
         return {}
 

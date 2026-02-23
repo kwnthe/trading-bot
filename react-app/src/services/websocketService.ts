@@ -81,9 +81,9 @@ export class LiveChartWebSocket {
       this.sessionId = sessionId
       this.isConnecting = true
 
-      // Construct WebSocket URL - use localhost for direct connection
-      const wsUrl = `ws://localhost:8000/ws/live/${sessionId}/`
-
+      // Construct WebSocket URL - use direct connection to API server
+      const wsUrl = `ws://192.168.2.22:8000/ws/live/${sessionId}/`
+      
       console.log(`DEBUG: Connecting to WebSocket: ${wsUrl}`)
 
       try {

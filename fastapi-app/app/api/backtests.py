@@ -328,7 +328,7 @@ async def api_run_backtest(request: BacktestRequest) -> Dict[str, Any]:
     }
 
 
-@router.get("/jobs/{job_id}/status")
+@router.get("/jobs/{job_id}/status/")
 async def job_status(job_id: str) -> JobStatus:
     """Get status of a job"""
     job_info = validate_job_exists(job_id)
@@ -364,7 +364,7 @@ async def job_status(job_id: str) -> JobStatus:
     )
 
 
-@router.get("/jobs/{job_id}/result")
+@router.get("/jobs/{job_id}/result/")
 async def job_result(job_id: str) -> Dict[str, Any]:
     """Get result of a job"""
     job_info = validate_job_exists(job_id)
