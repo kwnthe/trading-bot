@@ -15,6 +15,7 @@ import {
 
 import { sortAndDedupByTime, toTime } from '../utils/timeSeries'
 import { ChartZoneManager } from '../utils/ChartZoneManager'
+import type { ChartManager } from '../utils/ChartManager'
 import type { ResultJson } from '../api/types'
 import type { ChartMarker } from '../types/chart'
 
@@ -141,7 +142,6 @@ const getCookie = (name: string) => {
 }
 
 export default function ChartComponent({ result, symbol }: Props) {
-  console.log("result", result)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -157,6 +157,9 @@ export default function ChartComponent({ result, symbol }: Props) {
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const tpMarkersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const slMarkersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+
+  // Manager array for all chart managers
+  const chartManagers: ChartManager[] = []
 
   const didFitRef = useRef(false)
   const [chartMountId, setChartMountId] = useState(0)
@@ -373,9 +376,10 @@ export default function ChartComponent({ result, symbol }: Props) {
 
     if (!chart || !candles || !ema || !markers || !tpMarkers || !slMarkers) return
 
-    zoneSeriesRef.current.forEach(s => { try { chart.removeSeries(s) } catch {} })
+    // Clear all managers
+    chartManagers.forEach(manager => manager.clear())
     zoneSeriesRef.current = []
-    orderBoxSeriesRef.current.forEach(s => { try { chart.removeSeries(s) } catch {} })
+    orderBoxSeriesRef.current = []
     orderBoxSeriesRef.current = []
 
     if (!sym) {
@@ -425,11 +429,31 @@ export default function ChartComponent({ result, symbol }: Props) {
           })
           .filter(Boolean)
         
-        // Initialize zone manager
-        zoneManager = new ChartZoneManager(chart, zoneSeriesRef, {debugMode: false})
+        // Initialize zone manager and add to managers array
+        chartManagers.push(new ChartZoneManager(chart, zoneSeriesRef, {debugMode: false}))
         
-        // Process chart data
-        zoneManager.processData(symbolData)
+        // Automatically process data for all managers
+        chartManagers.forEach(manager => {
+          // Filter symbolData to only include keys the manager needs
+          const managerDataKeys = manager.getDataKeys()
+          const filteredData: Record<string, any> = {}
+          
+          Object.entries(symbolData).forEach(([timestamp, data]: [string, any]) => {
+            const filteredEntry: Record<string, any> = {}
+            managerDataKeys.forEach(key => {
+              if (data[key] !== undefined) {
+                filteredEntry[key] = data[key]
+              }
+            })
+            
+            // Only include timestamp if manager has relevant data
+            if (Object.keys(filteredEntry).length > 0) {
+              filteredData[timestamp] = filteredEntry
+            }
+          })
+          
+          manager.processData(filteredData)
+        })
         
         // Extract markers from the new data format
         markerData = []
@@ -449,6 +473,12 @@ export default function ChartComponent({ result, symbol }: Props) {
     }
     
     ema.setData(emaData)
+
+    // Render all managers
+    chartManagers.forEach(manager => {
+      const stats = manager.render()
+      console.log(`📊 ${manager.getName()}: Rendered ${stats.totalCount} elements`)
+    })
 
     // --- Order Boxes & Markers (Toggleable) ---
     const allMarkers: SeriesMarker<Time>[] = []

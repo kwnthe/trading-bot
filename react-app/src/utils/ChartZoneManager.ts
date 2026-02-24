@@ -6,6 +6,7 @@ import {
 } from 'lightweight-charts'
 import { toTime } from './timeSeries'
 import { mergeOverlappingZones, type ChartSegment } from './chartSegments'
+import { type ChartManager } from './ChartManager'
 
 export interface ResistanceSupportPoint {
   time: number
@@ -162,7 +163,7 @@ export interface ZoneRenderStats {
  * ChartZoneManager - Responsible for managing resistance/support zones
  * Handles data processing, segment creation, and rendering in both debug and production modes
  */
-export class ChartZoneManager {
+export class ChartZoneManager implements ChartManager {
   private chart: IChartApi
   private zoneSeriesRef: React.MutableRefObject<ISeriesApi<'Line'>[]>
   private config: ChartZoneManagerConfig
@@ -179,6 +180,14 @@ export class ChartZoneManager {
       debugMode: false,
       ...config
     }
+  }
+
+  /**
+   * Get the data keys this manager needs from symbolData
+   * @returns Array of data keys required by this manager
+   */
+  public getDataKeys(): string[] {
+    return ['resistance', 'support']
   }
 
   /**
@@ -205,7 +214,7 @@ export class ChartZoneManager {
    * Render zones based on current mode (debug or production)
    * @returns Zone rendering statistics
    */
-  public renderZones(): ZoneRenderStats {
+  public render(): ZoneRenderStats {
     if (!this.processedData) {
       throw new Error('No data processed. Call processData() first.')
     }
@@ -215,6 +224,28 @@ export class ChartZoneManager {
     } else {
       return this.renderAggregatedZones()
     }
+  }
+
+  /**
+   * Clear all rendered zones
+   */
+  public clear(): void {
+    this.zoneSeriesRef.current.forEach(series => {
+      try {
+        this.chart.removeSeries(series)
+      } catch (error) {
+        console.warn('Failed to remove zone series:', error)
+      }
+    })
+    this.zoneSeriesRef.current = []
+  }
+
+  /**
+   * Get the name/type of the manager
+   * @returns Manager name
+   */
+  public getName(): string {
+    return 'ChartZoneManager'
   }
 
   /**
