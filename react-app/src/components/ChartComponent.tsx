@@ -14,7 +14,7 @@ import {
 } from 'lightweight-charts'
 
 import { sortAndDedupByTime, toTime } from '../utils/timeSeries'
-import { createContinuousSegments, mergeOverlappingZones } from '../utils/chartSegments'
+import { ChartZoneManager } from '../utils/ChartZoneManager'
 import type { ResultJson } from '../api/types'
 import type { ChartMarker } from '../types/chart'
 
@@ -22,14 +22,8 @@ type Props = {
   result: ResultJson | null
   symbol: string
 }
-
 type Line = ISeriesApi<'Line'>
 
-const dedupPointsByTime = (pts: { time: Time; value: number }[]) => {
-  const m = new Map<number, { time: Time; value: number }>()
-  for (const p of pts) m.set(p.time as number, p)
-  return Array.from(m.values()).sort((a, b) => (a.time as number) - (b.time as number))
-}
 
 // Convert new marker format to lightweight-charts SeriesMarker format
 const convertMarkerToSeriesMarker = (marker: ChartMarker): SeriesMarker<Time> => {
@@ -147,6 +141,7 @@ const getCookie = (name: string) => {
 }
 
 export default function ChartComponent({ result, symbol }: Props) {
+  console.log("result", result)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -413,9 +408,8 @@ export default function ChartComponent({ result, symbol }: Props) {
     
     // Handle new data format (timestamp-keyed) or legacy format
     let emaData: any[] = []
-    let resistanceSegments: any[] = []
-    let supportSegments: any[] = []
     let markerData: any[] = []
+    let zoneManager: ChartZoneManager | null = null
     
     if (cd?.data && typeof cd.data === 'object') {
       // New format: symbol-keyed data
@@ -431,27 +425,11 @@ export default function ChartComponent({ result, symbol }: Props) {
           })
           .filter(Boolean)
         
-        // For zones, we need to convert point data to segments (this is a simplified approach)
-        // In the new format, we might need to aggregate consecutive points with the same value
-        const resistancePoints = Object.entries(symbolData)
-          .filter(([_, data]: [string, any]) => data.resistance !== undefined && data.resistance !== null)
-          .map(([timestamp, data]: [string, any]) => ({
-            time: parseInt(timestamp),
-            value: Number(data.resistance)
-          }))
-          .filter(p => Number.isFinite(p.value))
+        // Initialize zone manager
+        zoneManager = new ChartZoneManager(chart, zoneSeriesRef, {debugMode: false})
         
-        const supportPoints = Object.entries(symbolData)
-          .filter(([_, data]: [string, any]) => data.support !== undefined && data.support !== null)
-          .map(([timestamp, data]: [string, any]) => ({
-            time: parseInt(timestamp),
-            value: Number(data.support)
-          }))
-          .filter(p => Number.isFinite(p.value))
-        
-        // Convert points to continuous segments using utility function
-        resistanceSegments = createContinuousSegments(resistancePoints)
-        supportSegments = createContinuousSegments(supportPoints)
+        // Process chart data
+        zoneManager.processData(symbolData)
         
         // Extract markers from the new data format
         markerData = []
@@ -471,109 +449,6 @@ export default function ChartComponent({ result, symbol }: Props) {
     }
     
     ema.setData(emaData)
-
-    // Merge overlapping zones at the same price level to prevent rendering conflicts
-const mergeOverlappingZones = (segments: any[]) => {
-  const priceGroups = new Map<number, any[]>()
-  
-  // Group segments by price value
-  segments.forEach(seg => {
-    const price = Number(seg.value)
-    if (!priceGroups.has(price)) {
-      priceGroups.set(price, [])
-    }
-    priceGroups.get(price)!.push(seg)
-  })
-  
-  const mergedSegments: any[] = []
-  
-  // Merge overlapping segments within each price group
-  for (const [, group] of priceGroups.entries()) {
-    if (group.length === 1) {
-      // No overlap, keep as is (but create a copy to avoid read-only issues)
-      const seg = group[0]
-      mergedSegments.push({
-        startTime: seg.startTime,
-        endTime: seg.endTime,
-        value: seg.value
-      })
-    } else {
-      // Sort by start time
-      group.sort((a, b) => a.startTime - b.startTime)
-      
-      // Merge overlapping segments
-      let current = {
-        startTime: group[0].startTime,
-        endTime: group[0].endTime,
-        value: group[0].value
-      }
-      
-      for (let i = 1; i < group.length; i++) {
-        const next = group[i]
-        
-        // Check if segments overlap or are adjacent
-        if (next.startTime <= current.endTime) {
-          // Merge them - extend the end time if needed (create new object)
-          current = {
-            startTime: current.startTime,
-            endTime: Math.max(current.endTime, next.endTime),
-            value: current.value
-          }
-        } else {
-          // No overlap, push current and start new one
-          mergedSegments.push(current)
-          current = {
-            startTime: next.startTime,
-            endTime: next.endTime,
-            value: next.value
-          }
-        }
-      }
-      
-      // Push the last merged segment
-      mergedSegments.push(current)
-    }
-  }
-  
-  return mergedSegments
-}
-
-    // Resistance/Support - use the data we already processed above
-    // Merge overlapping zones to prevent rendering conflicts
-    const mergedResistanceSegments = mergeOverlappingZones(resistanceSegments)
-    const mergedSupportSegments = mergeOverlappingZones(supportSegments)
-    
-    let zonesRendered = 0
-    let zonesSkipped = 0
-    
-    for (const seg of mergedResistanceSegments) {
-      const val = Number(seg.value); const s = toTime(seg.startTime); const e = toTime(seg.endTime)
-      
-      if (s && e && Number.isFinite(val) && s !== e) {
-        const zone = chart.addSeries(LineSeries, { color: 'rgba(239, 83, 80, 0.95)', lineWidth: 3, priceLineVisible: false, lastValueVisible: false })
-        const zoneData = [{ time: s as Time, value: val }, { time: e as Time, value: val }]
-        
-        zone.setData(zoneData)
-        zoneSeriesRef.current.push(zone)
-        zonesRendered++
-      } else {
-        zonesSkipped++
-      }
-    }
-    for (const seg of mergedSupportSegments) {
-      const val = Number(seg.value); const s = toTime(seg.startTime); const e = toTime(seg.endTime)
-      
-      if (s && e && Number.isFinite(val) && s !== e) {
-        const zone = chart.addSeries(LineSeries, { color: 'rgba(33, 150, 243, 0.95)', lineWidth: 3, priceLineVisible: false, lastValueVisible: false })
-        const zoneData = [{ time: s as Time, value: val }, { time: e as Time, value: val }]
-        
-        zone.setData(zoneData)
-        zoneSeriesRef.current.push(zone)
-        zonesRendered++
-      } else {
-        zonesSkipped++
-      }
-    }
 
     // --- Order Boxes & Markers (Toggleable) ---
     const allMarkers: SeriesMarker<Time>[] = []

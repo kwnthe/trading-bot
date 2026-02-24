@@ -56,30 +56,39 @@ export function createContinuousSegments(points: ChartPoint[], maxGapSeconds: nu
 
 /**
  * Merge overlapping segments at the same price level to prevent rendering conflicts
+ * Note: The main logic for creating segments from raw candle data is now handled
+ * in ChartComponent.tsx to properly respect null breaks and same-price continuity
  * @param segments Array of chart segments
  * @returns Array of merged segments
  */
 export function mergeOverlappingZones(segments: ChartSegment[]): ChartSegment[] {
-  const priceGroups = new Map<number, ChartSegment[]>()
+  if (segments.length === 0) return []
   
-  // Group segments by price value
-  segments.forEach(seg => {
-    const price = Number(seg.value)
-    if (!priceGroups.has(price)) {
-      priceGroups.set(price, [])
-    }
-    priceGroups.get(price)!.push(seg)
-  })
+  // Sort segments by start time to process chronologically
+  segments.sort((a, b) => a.startTime - b.startTime)
   
   const mergedSegments: ChartSegment[] = []
   
-  // Merge overlapping segments within each price group
+  // Group segments by exact price value (with precision handling)
+  const priceGroups = new Map<string, ChartSegment[]>()
+  
+  segments.forEach(seg => {
+    const price = Number(seg.value)
+    const priceKey = price.toFixed(4) // Handle floating point precision
+    if (!priceGroups.has(priceKey)) {
+      priceGroups.set(priceKey, [])
+    }
+    priceGroups.get(priceKey)!.push(seg)
+  })
+  
+  // Process each price group separately
   for (const [, group] of priceGroups.entries()) {
     if (group.length === 0) continue
     
     // Sort by start time
     group.sort((a, b) => a.startTime - b.startTime)
     
+    // Create continuous segments only from consecutive/overlapping segments
     let current: ChartSegment = {
       startTime: group[0].startTime,
       endTime: group[0].endTime,
@@ -89,16 +98,18 @@ export function mergeOverlappingZones(segments: ChartSegment[]): ChartSegment[] 
     for (let i = 1; i < group.length; i++) {
       const next = group[i]
       
-      // Check if segments overlap or are adjacent
+      // Check if segments are consecutive or overlapping
+      // This means there are no gaps between them (continuous resistance/support)
       if (next.startTime <= current.endTime) {
-        // Merge them - extend the end time if needed
+        // Overlapping or adjacent - merge them
         current = {
           startTime: current.startTime,
           endTime: Math.max(current.endTime, next.endTime),
           value: current.value
         }
       } else {
-        // No overlap, push current and start new one
+        // Gap found - this breaks the continuity
+        // Push the current segment and start a new one
         mergedSegments.push(current)
         current = {
           startTime: next.startTime,
@@ -108,7 +119,7 @@ export function mergeOverlappingZones(segments: ChartSegment[]): ChartSegment[] 
       }
     }
     
-    // Push the last merged segment
+    // Push the last segment for this price group
     mergedSegments.push(current)
   }
   
