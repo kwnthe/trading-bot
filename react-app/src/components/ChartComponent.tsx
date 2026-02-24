@@ -429,7 +429,7 @@ export default function ChartComponent({ result, symbol }: Props) {
           })
           .filter(Boolean)
         
-        // Initialize zone manager and add to managers array
+        // Initialize managers and add to managers array
         chartManagers.push(new ChartZoneManager(chart, zoneSeriesRef, {debugMode: false}))
         
         // Automatically process data for all managers
