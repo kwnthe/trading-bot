@@ -137,7 +137,7 @@ def start_live_runner_process(base_dir: Path, session_dir: Path,
     # Prepare environment
     env = os.environ.copy()
     # Add both the FastAPI app directory and the parent directory to Python path
-    env['PYTHONPATH'] = f"{str(base_dir.parent)};{str(base_dir)}"
+    env['PYTHONPATH'] = f"{str(base_dir.parent)}{os.pathsep}{str(base_dir)}"
     env['SESSION_DIR'] = str(session_dir)
     
     # Use virtual environment Python if available
@@ -152,17 +152,19 @@ def start_live_runner_process(base_dir: Path, session_dir: Path,
     else:
         python_exe = sys.executable
         print(f"DEBUG: Using system Python: {python_exe}")
-    # Start the process
-    with open(stdout_log, 'w') as stdout_file, \
-         open(stderr_log, 'w') as stderr_file:
-        
-        process = subprocess.Popen(
-            [python_exe, str(runner_script), "--session-dir", str(session_dir)],
-            stdout=stdout_file,
-            stderr=stderr_file,
-            env=env,
-            cwd=str(base_dir)
-        )
+    # Start the process - open files WITHOUT context manager so they stay
+    # open for the subprocess lifetime (with-block closes them immediately)
+    stdout_file = open(stdout_log, 'w')
+    stderr_file = open(stderr_log, 'w')
+    
+    process = subprocess.Popen(
+        [python_exe, str(runner_script), "--session-dir", str(session_dir)],
+        stdout=stdout_file,
+        stderr=stderr_file,
+        env=env,
+        cwd=str(base_dir),
+        start_new_session=True,  # Detach from parent process group
+    )
     
     return process.pid
 

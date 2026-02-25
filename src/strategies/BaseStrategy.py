@@ -2,7 +2,7 @@ import backtrader as bt
 import csv
 import math
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from src.indicators.BreakoutIndicator import BreakoutIndicator
 from src.indicators.BreakRetestIndicator import BreakRetestIndicator
@@ -221,6 +221,19 @@ class BaseStrategy(bt.Strategy):
             return self.broker.candle_data
         return {}
     
+    @staticmethod
+    def _utc_timestamp(dt: datetime) -> int:
+        """Convert a (possibly naive) datetime from backtrader to a UTC unix timestamp.
+        
+        Backtrader strips timezone info when storing datetimes internally.
+        Calling .timestamp() on a naive datetime assumes local time, which
+        produces an offset equal to the local timezone (e.g. 2h for UTC+2).
+        This method treats the naive datetime as UTC to avoid that offset.
+        """
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+
     def next(self):
         self.candle_index = len(self.data) 
         
@@ -1208,8 +1221,14 @@ class BaseStrategy(bt.Strategy):
             indicators = data_indicators[data_feed_index]
             data = indicators['data']
             
-            # Get current time
-            current_time = self._get_time_for_candle_index(self.candle_index, data_feed_index)
+            # Get current bar's timestamp directly from the data feed.
+            # NOTE: Do NOT use _get_time_for_candle_index(self.candle_index)
+            # because data.datetime[N] with positive N looks N bars into the
+            # future in backtrader, causing an offset.
+            try:
+                current_time = self._utc_timestamp(data.datetime.datetime(0))
+            except Exception:
+                return
             
             # Skip if timestamp unavailable
             if current_time is None:

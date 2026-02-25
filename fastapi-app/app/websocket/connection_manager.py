@@ -16,9 +16,7 @@ class ConnectionManager:
         self.session_metadata: Dict[str, Dict[str, Any]] = {}
     
     async def connect(self, websocket: WebSocket, session_id: str):
-        """Accept and register a WebSocket connection"""
-        await websocket.accept()
-        
+        """Register a WebSocket connection (must already be accepted)."""
         # Add connection to session group
         if session_id not in self.active_connections:
             self.active_connections[session_id] = set()
@@ -37,14 +35,6 @@ class ConnectionManager:
         
         print(f"WebSocket connected for session {session_id}. "
               f"Total connections for session: {len(self.active_connections[session_id])}")
-        
-        # Send initial connection confirmation
-        await self.send_personal_message({
-            'type': 'connection_established',
-            'session_id': session_id,
-            'timestamp': datetime.now().isoformat(),
-            'message': 'Connected to live chart stream'
-        }, websocket)
     
     def disconnect(self, websocket: WebSocket, session_id: str):
         """Remove a WebSocket connection"""

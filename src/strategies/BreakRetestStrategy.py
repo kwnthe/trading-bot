@@ -85,7 +85,7 @@ class BreakRetestStrategy(BaseStrategy):
             
             # Get current candle's datetime first (needed for both markers and EMA)
             current_bar_time = data.datetime.datetime(0) if hasattr(data, 'datetime') else None
-            current_time = int(current_bar_time.timestamp()) if current_bar_time else self._get_time_for_candle_index(self.candle_index, i)
+            current_time = self._utc_timestamp(current_bar_time) if current_bar_time else self._get_time_for_candle_index(self.candle_index, i)
             
             # Add EMA data for current candle (dynamic chart overlay)
             ema = data_indicators[i]['ema']
@@ -372,7 +372,7 @@ class BreakRetestStrategy(BaseStrategy):
         
         # Add trade to chart overlays - PLACEMENT stage
         self.add_chart_trade(
-            placed_on=int(current_datetime.timestamp()),
+            placed_on=self._utc_timestamp(current_datetime),
             state=TradeState.PENDING,
             trade_id=trade_id,
             symbol=symbol,
@@ -380,7 +380,8 @@ class BreakRetestStrategy(BaseStrategy):
             entry_price=entry_price,
             size=size,
             tp=tp,
-            sl=sl
+            sl=sl,
+            data_index=data_index
         )  
 
     # ----------------------- INVALIDATE PENDING FOR SPECIFIC DATA FEED -----------------------  
@@ -444,10 +445,11 @@ class BreakRetestStrategy(BaseStrategy):
             
             # Add trade to chart overlays - CANCELLATION stage
             self.add_chart_trade(
-                placed_on=int(trade['placed_datetime'].timestamp()),
+                placed_on=self._utc_timestamp(trade['placed_datetime']),
                 state=TradeState.CANCELED,
                 trade_id=trade_id,
-                close_reason='CANCELED'
+                close_reason='CANCELED',
+                data_index=trade.get('data_index')
             )
             data_index = trade.get('data_index')
             data_indicators = self._get_data_indicators()
@@ -565,11 +567,12 @@ class BreakRetestStrategy(BaseStrategy):
                 
                 # Add trade to chart overlays - EXECUTION stage
                 self.add_chart_trade(
-                    placed_on=int(trade_record['placed_datetime'].timestamp()),
-                    executed_on=int(current_datetime.timestamp()),
+                    placed_on=self._utc_timestamp(trade_record['placed_datetime']),
+                    executed_on=self._utc_timestamp(current_datetime),
                     state=TradeState.RUNNING,
                     trade_id=order.trade_id,
-                    entry_executed_price=order.executed.price
+                    entry_executed_price=order.executed.price,
+                    data_index=trade_record.get('data_index')
                 )
                 trade_record['time_to_fill'] = self.candle_index - trade_record['placed_candle'] + 1
                 # We have to convert highest_excursion_from_breakout to atr_rel_excursion
@@ -609,13 +612,14 @@ class BreakRetestStrategy(BaseStrategy):
         
         # Add trade to chart overlays - CLOSING stage
         self.add_chart_trade(
-            placed_on=int(trade_record['placed_datetime'].timestamp()),
-            executed_on=int(trade_record.get('open_datetime').timestamp()) if trade_record.get('open_datetime') else None,
-            closed_on=int(current_datetime.timestamp()),
+            placed_on=self._utc_timestamp(trade_record['placed_datetime']),
+            executed_on=self._utc_timestamp(trade_record.get('open_datetime')) if trade_record.get('open_datetime') else None,
+            closed_on=self._utc_timestamp(current_datetime),
             closed_on_price=exit_executed_price,
             state=trade_state,
             trade_id=trade_record['trade_id'],
-            exit_type=exit_type
+            exit_type=exit_type,
+            data_index=trade_record.get('data_index')
         )
         # Use executed entry price if available, otherwise fall back to order price
         entry_price = trade_record.get('entry_executed_price') or trade_record.get("entry_price")

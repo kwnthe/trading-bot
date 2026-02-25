@@ -55,10 +55,15 @@ async def add_websocket_cors(request, call_next):
 app.include_router(api_router, prefix="/api")
 app.include_router(websocket_router)
 
-# Static files (if needed for any remaining static content)
-static_dir = Path(__file__).parent / "static"
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+# Serve React app
+react_build_dir = Path(__file__).parent.parent / "react-app" / "dist"
+if react_build_dir.exists():
+    app.mount("/", StaticFiles(directory=str(react_build_dir), html=True), name="react")
+else:
+    # Static files (fallback)
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 @app.get("/")
@@ -69,6 +74,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+@app.websocket("/ws/test")
+async def websocket_test(websocket: WebSocket):
+    await websocket.accept()
+    await websocket.send_text("WebSocket test successful!")
+    await websocket.close()
 
 
 if __name__ == "__main__":

@@ -8,11 +8,11 @@ export default defineConfig({
     host: '0.0.0.0', // Allow connections from any IP
     proxy: {
       '/api': {
-        target: process.env.VITE_API_TARGET || 'http://192.168.2.22:8000',
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.4:8000',
         changeOrigin: true,
       },
       '/ws': {
-        target: process.env.VITE_API_TARGET || 'http://192.168.2.22:8000',
+        target: process.env.VITE_API_TARGET || 'http://192.168.2.4:8000',
         changeOrigin: true,
         ws: true,
       },

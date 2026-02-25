@@ -139,19 +139,19 @@ class JobResult(BaseModel):
 
 class LiveSessionStatus(BaseModel):
     session_id: str
-    state: Literal["queued", "running", "stopped", "error"]
-    created_at: Optional[datetime]
-    updated_at: Optional[datetime]
-    pid: Optional[int]
-    python_executable: Optional[str]
-    returncode: Optional[int]
-    error: Optional[str]
-    latest_seq: Optional[int]
-    params: Optional[Dict[str, Any]]
-    stdout: Optional[str]
-    stderr: Optional[str]
-    has_snapshot: bool
-    snapshot_url: Optional[str]
+    state: Literal["queued", "running", "stopped", "error", "unknown"]
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    pid: Optional[int] = None
+    python_executable: Optional[str] = None
+    returncode: Optional[int] = None
+    error: Optional[str] = None
+    latest_seq: Optional[int] = None
+    params: Optional[Dict[str, Any]] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    has_snapshot: bool = False
+    snapshot_url: Optional[str] = None
 
 
 class LiveSessionStart(BaseModel):

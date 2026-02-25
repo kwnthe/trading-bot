@@ -238,7 +238,8 @@ export default function ChartComponent({ result, symbol }: Props) {
   }
 
   // ---------------- OPACITY SETTINGS ----------------
-  const RESULT_BOX_OPACITY = 0.3    // Opacity for the "winning" side (TP for profitable, SL for losing)
+  // const RESULT_BOX_OPACITY = 0.3    // Opacity for the "winning" side (TP for profitable, SL for losing)
+  const RESULT_BOX_OPACITY = 0.07
   const NON_RESULT_BOX_OPACITY = 0.07 // Opacity for the "losing" side (very faint)
   const DEFAULT_BOX_OPACITY = 0.1    // Opacity for other states (PENDING, RUNNING, CANCELED)
 
@@ -531,8 +532,8 @@ export default function ChartComponent({ result, symbol }: Props) {
           value: marker.price,
           direction: marker.direction  // Add direction info
         }
-        // Only add retest order markers if toggle is on
-        if (marker.marker !== 'retest_order_placed' || showRetestOrders) {
+        // Only add retest order markers if toggle is on (default: show all)
+        if (marker.marker !== 'retest_order_placed' || true) {
           try {
             const seriesMarker = convertMarkerToSeriesMarker(convertedMarker as ChartMarker)
             allMarkers.push(seriesMarker)
@@ -564,7 +565,7 @@ export default function ChartComponent({ result, symbol }: Props) {
 
         const entry = Number(b.entry); const sl = Number(b.sl); const tp = Number(b.tp)
         const reason = String(b.closeReason || '')
-
+        
         const { sl: slC, tp: tpC } = colorsForCloseReason(reason)
         const slS = chart.addSeries(BaselineSeries, { baseValue: { type: 'price', price: entry }, topFillColor1: slC, topFillColor2: slC, bottomFillColor1: slC, bottomFillColor2: slC, topLineColor: 'rgba(0,0,0,0)', bottomLineColor: 'rgba(0,0,0,0)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false })
         slS.setData([{ time: openTime as Time, value: sl }, { time: closeTime as Time, value: sl }])
